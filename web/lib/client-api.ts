@@ -81,6 +81,9 @@ export function installWebApi(): void {
     resolve(item: MediaItem) {
       return request<MediaItem | null>('/api/resolve', { item, sources: settings().sources });
     },
+    play(sourceId: string, token: string) {
+      return request('/api/play', { sourceId, token, sources: settings().sources });
+    },
     async getSettings() { return settings(); },
     async saveSources(sources: CmsSource[]) { return saveSettings({ ...settings(), sources }); },
     async saveQuality(quality: AppSettings['qualityPreference']) { return saveSettings({ ...settings(), qualityPreference: quality }); },

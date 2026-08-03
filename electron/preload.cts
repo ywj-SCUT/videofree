@@ -5,6 +5,7 @@ const api = {
   search: (query: string, category: MediaCategory) => ipcRenderer.invoke('media:search', query, category),
   detail: (sourceId: string, id: string) => ipcRenderer.invoke('media:detail', sourceId, id),
   resolve: (item: unknown) => ipcRenderer.invoke('media:resolve', item),
+  play: (sourceId: string, token: string) => ipcRenderer.invoke('media:play', sourceId, token),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   saveSources: (sources: CmsSource[]) => ipcRenderer.invoke('settings:sources', sources),
   saveQuality: (quality: AppSettings['qualityPreference']) => ipcRenderer.invoke('settings:quality', quality),

@@ -10,21 +10,38 @@ const defaultHeaders = {
   Accept: '*/*',
 };
 
-function proxyUrl(target: string, referer: string, filterAds = false): string {
+function proxyUrl(target: string, referer: string, filterAds = false, customHeaders?: Record<string, string>): string {
   const search = new URLSearchParams({ url: target, referer });
   if (filterAds) search.set('filterAds', '1');
+  if (customHeaders && Object.keys(customHeaders).length) search.set('headers', JSON.stringify(customHeaders));
   return `/api/proxy?${search.toString()}`;
 }
 
-function rewriteManifest(manifest: string, manifestUrl: string, referer: string, filterAds = false): string {
+function rewriteManifest(manifest: string, manifestUrl: string, referer: string, filterAds = false, customHeaders?: Record<string, string>): string {
   return manifest.split(/\r?\n/).map((line) => {
     const trimmed = line.trim();
     if (!trimmed) return line;
     if (trimmed.startsWith('#')) {
-      return line.replace(/URI="([^"]+)"/g, (_match, uri: string) => `URI="${proxyUrl(new URL(uri, manifestUrl).toString(), referer, filterAds)}"`);
+      return line.replace(/URI="([^"]+)"/g, (_match, uri: string) => `URI="${proxyUrl(new URL(uri, manifestUrl).toString(), referer, filterAds, customHeaders)}"`);
     }
-    return proxyUrl(new URL(trimmed, manifestUrl).toString(), referer, filterAds);
+    return proxyUrl(new URL(trimmed, manifestUrl).toString(), referer, filterAds, customHeaders);
   }).join('\n');
+}
+
+function playbackHeaders(value: string | null): Record<string, string> {
+  if (!value || value.length > 12_000) return {};
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const blocked = new Set(['host', 'content-length', 'connection', 'proxy-authorization', 'transfer-encoding', 'range']);
+    return Object.fromEntries(Object.entries(parsed).flatMap(([name, raw]) => {
+      const key = name.trim();
+      const headerValue = String(raw ?? '').trim();
+      if (!/^[a-z0-9-]{1,64}$/i.test(key) || blocked.has(key.toLowerCase()) || !headerValue || headerValue.length > 4096 || /[\r\n]/.test(headerValue)) return [];
+      return [[key, headerValue]];
+    }));
+  } catch {
+    return {};
+  }
 }
 
 async function fetchUpstream(target: string, headers: Record<string, string>) {
@@ -49,7 +66,8 @@ export async function GET(request: Request) {
   try {
     const referer = incoming.searchParams.get('referer') ?? target;
     const filterAds = incoming.searchParams.get('filterAds') === '1';
-    const headers: Record<string, string> = { ...defaultHeaders, Referer: referer };
+    const customHeaders = playbackHeaders(incoming.searchParams.get('headers'));
+    const headers: Record<string, string> = { ...defaultHeaders, ...customHeaders, Referer: customHeaders.Referer ?? customHeaders.referer ?? referer };
     const range = request.headers.get('range');
     if (range) headers.Range = range;
     const upstream = await fetchUpstream(target, headers);
@@ -60,7 +78,7 @@ export async function GET(request: Request) {
       const effectiveUrl = upstream.url || target;
       const original = await upstream.text();
       const filtered = filterAds ? filterHlsManifest(original) : { manifest: original, removedSegments: 0, removedDuration: 0, removedMarkers: 0 };
-      return new Response(rewriteManifest(filtered.manifest, effectiveUrl, effectiveUrl, filterAds), {
+      return new Response(rewriteManifest(filtered.manifest, effectiveUrl, effectiveUrl, filterAds, customHeaders), {
         headers: {
           'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8', 'Cache-Control': 'no-cache',
           'X-VideoGET-Ad-Segments': String(filtered.removedSegments),

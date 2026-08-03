@@ -3,6 +3,8 @@ export type MediaCategory = 'all' | 'movie' | 'series' | 'anime' | 'short' | 'ai
 export interface Episode {
   name: string;
   url: string;
+  sourceId?: string;
+  headers?: Record<string, string>;
 }
 
 export interface PlayLine {
@@ -45,6 +47,13 @@ export interface CmsSource {
   categories?: string[];
   headers?: Record<string, string>;
   script?: string;
+  scriptUrl?: string;
+  ruleConfig?: Record<string, unknown>;
+}
+
+export interface PlaybackResolution {
+  url: string;
+  headers?: Record<string, string>;
 }
 
 export interface LiveChannel {

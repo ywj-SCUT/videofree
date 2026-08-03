@@ -1,5 +1,5 @@
 export type MediaCategory = 'all' | 'movie' | 'series' | 'anime' | 'short' | 'ai-short' | 'live';
-export interface Episode { name: string; url: string }
+export interface Episode { name: string; url: string; sourceId?: string; headers?: Record<string, string> }
 export interface PlayLine { name: string; episodes: Episode[] }
 export interface MediaVariant { id: string; sourceId: string; sourceName: string }
 export interface MediaItem {
@@ -12,7 +12,9 @@ export interface MediaItem {
 export interface CmsSource {
   id: string; name: string; type: 'cms' | 'spider'; api?: string; enabled: boolean;
   searchable: boolean; categories?: string[]; headers?: Record<string, string>; script?: string;
+  scriptUrl?: string; ruleConfig?: Record<string, unknown>;
 }
+export interface PlaybackResolution { url: string; headers?: Record<string, string> }
 export interface LiveChannel {
   id: string; sourceId: string; sourceName: string; name: string; group: string;
   url: string; urls?: string[]; logo?: string; tvgId?: string;
@@ -43,6 +45,7 @@ export interface LumenApi {
   search(query: string, category: MediaCategory): Promise<SearchResponse>;
   detail(sourceId: string, id: string): Promise<MediaItem | null>;
   resolve(item: MediaItem): Promise<MediaItem | null>;
+  play(sourceId: string, token: string): Promise<PlaybackResolution>;
   getSettings(): Promise<AppSettings>;
   saveSources(sources: CmsSource[]): Promise<AppSettings>;
   saveQuality(quality: AppSettings['qualityPreference']): Promise<AppSettings>;

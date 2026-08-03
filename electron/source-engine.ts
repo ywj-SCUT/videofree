@@ -1,7 +1,7 @@
-import vm from 'node:vm';
 import { fetchRemoteText } from './net-client.js';
 import { OPEN_CATALOG } from './open-catalog.js';
-import type { CmsSource, LiveChannel, MediaCategory, MediaItem, MediaVariant, PlayLine, SearchResponse } from './types.js';
+import { detailRule, resolveRulePlayback, searchRule, testRule } from './rule-engine.js';
+import type { CmsSource, LiveChannel, MediaCategory, MediaItem, MediaVariant, PlaybackResolution, PlayLine, SearchResponse } from './types.js';
 
 const requestHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
@@ -94,39 +94,6 @@ async function detailCms(source: CmsSource, id: string): Promise<MediaItem | nul
   return item ? normalizeVod(item, source) : null;
 }
 
-function validateSpiderScript(script: string): void {
-  const blocked = /(?:process|require|import\s*\(|child_process|fs\.|Function\s*\(|eval\s*\()/;
-  if (blocked.test(script)) throw new Error('规则包含被禁用的运行时能力');
-  if (script.length > 100_000) throw new Error('规则脚本超过 100 KB');
-}
-
-async function runSpider(source: CmsSource, operation: 'search' | 'detail', value: string): Promise<MediaItem[]> {
-  if (!source.script) return [];
-  validateSpiderScript(source.script);
-  const sandbox = {
-    module: { exports: {} as Record<string, unknown> },
-    exports: {},
-    console: { log: () => undefined },
-    encodeURIComponent,
-    JSON,
-  };
-  vm.createContext(sandbox, { codeGeneration: { strings: false, wasm: false } });
-  new vm.Script(source.script, { filename: `${source.id}.spider.js` }).runInContext(sandbox, { timeout: 500 });
-  const exported = sandbox.module.exports as Record<string, unknown>;
-  const handler = exported[operation];
-  if (typeof handler !== 'function') return [];
-  const request = await (handler as (value: string) => unknown)(value) as { url: string; method?: string; headers?: Record<string, string>; body?: string; parse?: string };
-  const text = await fetchRemoteText(request.url, {
-    method: request.method ?? 'GET', headers: { ...requestHeaders, ...request.headers }, body: request.body,
-  });
-  const parser = exported[request.parse ?? `parse${operation[0].toUpperCase()}${operation.slice(1)}`];
-  if (typeof parser !== 'function') throw new Error('规则缺少解析函数');
-  const parsed = await (parser as (text: string) => unknown)(text);
-  return (Array.isArray(parsed) ? parsed : [parsed]).filter(Boolean).map((item) => ({
-    ...(item as MediaItem), sourceId: source.id, sourceName: source.name,
-  }));
-}
-
 export async function aggregateSearch(sources: CmsSource[], query: string, category: MediaCategory): Promise<SearchResponse> {
   const started = Date.now();
   const normalizedQuery = query.trim().toLowerCase();
@@ -137,7 +104,7 @@ export async function aggregateSearch(sources: CmsSource[], query: string, categ
   const active = sources.filter((source) => source.enabled && source.searchable);
   const settled = await Promise.allSettled(active.map((source) => source.type === 'cms'
     ? searchCms(source, query)
-    : runSpider(source, 'search', query)));
+    : searchRule(source, query)));
   const failures: SearchResponse['failures'] = [];
   const remote: MediaItem[] = [];
   settled.forEach((result, index) => {
@@ -198,8 +165,15 @@ export async function getDetail(sources: CmsSource[], sourceId: string, id: stri
   if (local) return local;
   const source = sources.find((entry) => entry.id === sourceId);
   if (!source) return null;
-  if (source.type === 'spider') return (await runSpider(source, 'detail', id))[0] ?? null;
+  if (source.type === 'spider') return detailRule(source, id);
   return detailCms(source, id);
+}
+
+export async function resolvePlayback(sources: CmsSource[], sourceId: string, token: string): Promise<PlaybackResolution> {
+  if (/^https?:\/\//i.test(token)) return { url: token };
+  const source = sources.find((entry) => entry.id === sourceId && entry.type === 'spider');
+  if (!source) throw new Error('没有找到剧集对应的规则源');
+  return resolveRulePlayback(source, token);
 }
 
 export async function resolveMedia(sources: CmsSource[], item: MediaItem): Promise<MediaItem | null> {
@@ -232,7 +206,7 @@ export async function testSource(source: CmsSource): Promise<{ ok: boolean; late
   const started = Date.now();
   try {
     if (source.type === 'cms') await searchCms(source, '测试');
-    else await runSpider(source, 'search', '测试');
+    else await testRule(source);
     return { ok: true, latencyMs: Date.now() - started, message: '连接正常' };
   } catch (error) {
     return { ok: false, latencyMs: Date.now() - started, message: error instanceof Error ? error.message : String(error) };
@@ -250,9 +224,22 @@ export function importTvBox(input: unknown): { sources: CmsSource[]; lives: Live
     if (type === 1 && /^https?:\/\//i.test(api)) {
       return [{ id: String(site.key ?? `tvbox-${index}`), name: String(site.name ?? `视频源 ${index + 1}`), type: 'cms', api, enabled: true, searchable: Number(site.searchable ?? 1) !== 0 }];
     }
-    const script = typeof ext === 'object' && typeof ext.script === 'string' ? ext.script : undefined;
-    if (type === 3 && script) {
-      return [{ id: String(site.key ?? `spider-${index}`), name: String(site.name ?? `规则源 ${index + 1}`), type: 'spider', script, enabled: true, searchable: Number(site.searchable ?? 1) !== 0 }];
+    const script = typeof ext === 'object' && typeof ext.script === 'string'
+      ? ext.script
+      : typeof ext === 'string' && /(?:module\.exports|exports\.)/.test(ext) ? ext : undefined;
+    const scriptUrl = typeof ext === 'object' && typeof ext.scriptUrl === 'string'
+      ? ext.scriptUrl
+      : typeof ext === 'object' && typeof ext.url === 'string' ? ext.url
+        : typeof ext === 'string' && /^https?:\/\//i.test(ext) ? ext
+          : type === 3 && /^https?:\/\/.*\.js(?:$|\?)/i.test(api) ? api : undefined;
+    const ruleConfig = typeof ext === 'object' && ext.config && typeof ext.config === 'object'
+      ? ext.config as Record<string, unknown> : undefined;
+    if (type === 3 && (script || scriptUrl)) {
+      return [{
+        id: String(site.key ?? `spider-${index}`), name: String(site.name ?? `规则源 ${index + 1}`),
+        type: 'spider', script, scriptUrl, ruleConfig, enabled: true,
+        searchable: Number(site.searchable ?? 1) !== 0,
+      }];
     }
     return [];
   });

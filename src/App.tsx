@@ -98,11 +98,12 @@ function imageUrl(source: string, proxyPort: number, width: number, height: numb
   return `http://127.0.0.1:${proxyPort}/image?${params}`;
 }
 
-function streamUrl(settings: AppSettings, source: string): string {
+function streamUrl(settings: AppSettings, source: string, headers?: Record<string, string>): string {
   if (!/^https?:\/\//i.test(source)) return source;
   const adFilter = settings.adFiltering ? '&filterAds=1' : '';
-  if (settings.proxyBaseUrl) return `${settings.proxyBaseUrl}?url=${encodeURIComponent(source)}${adFilter}`;
-  return settings.proxyPort > 0 ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(source)}${adFilter}` : source;
+  const requestHeaders = headers && Object.keys(headers).length ? `&headers=${encodeURIComponent(JSON.stringify(headers))}` : '';
+  if (settings.proxyBaseUrl) return `${settings.proxyBaseUrl}?url=${encodeURIComponent(source)}${adFilter}${requestHeaders}`;
+  return settings.proxyPort > 0 ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(source)}${adFilter}${requestHeaders}` : source;
 }
 
 function App() {
@@ -448,82 +449,94 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
     setDanmakuLabel('正在匹配弹幕');
     setDanmakuVisible(true);
     setResumedAt(0);
-    const originalUrl = current.url;
-    const url = streamUrl(settings, originalUrl);
     let active = true;
-    const instance = new Artplayer({
-      container: container.current,
-      url,
-      volume: 0.8,
-      autoplay: true,
-      autoSize: false,
-      fullscreen: true,
-      fullscreenWeb: true,
-      pip: true,
-      playbackRate: true,
-      aspectRatio: true,
-      setting: true,
-      hotkey: true,
-      theme: '#ffffff',
-      lang: 'zh-cn',
-      plugins: [artplayerPluginDanmuku({
-        danmuku: async () => {
-          try {
-            const response = await window.lumen.danmaku(item.title, current.name);
-            if (active) setDanmakuLabel(response.comments.length
-              ? `${response.comments.length} 条弹幕 · ${response.matches.length} 个源`
-              : response.failures.length ? '弹幕源暂不可用' : '本集暂无弹幕');
-            return response.comments.map(({ text, time, mode, color }) => ({ text, time, mode, color }));
-          } catch {
-            if (active) setDanmakuLabel('弹幕加载失败');
-            return [];
-          }
-        },
-        speed: 5,
-        opacity: 0.78,
-        fontSize: 24,
-        margin: [10, '25%'],
-        antiOverlap: true,
-        synchronousPlayback: true,
-        heatmap: true,
-        emitter: false,
-      })],
-      type: /m3u8(?:$|\?)/i.test(originalUrl) ? 'm3u8' : undefined,
-      customType: {
-        m3u8: (video, sourceUrl, art) => {
-          attachHls(video, sourceUrl, art, settings.qualityPreference, setQualityLabel);
-        },
-      },
-    });
+    let instance: Artplayer | null = null;
     let lastSaved = 0;
     let resumeApplied = false;
     const saveProgress = () => {
-      if (instance.currentTime > 0 && Number.isFinite(instance.currentTime)) {
+      if (instance && instance.currentTime > 0 && Number.isFinite(instance.currentTime)) {
         onProgress(item, instance.currentTime, instance.duration || 0, lines[lineIndex]?.name ?? '', current.name);
       }
     };
-    instance.on('video:timeupdate', () => {
-      if (Date.now() - lastSaved > 5000) {
-        lastSaved = Date.now();
-        saveProgress();
+    void (async () => {
+      try {
+        const resolved = current.url.startsWith('videoget-rule:')
+          ? await window.lumen.play(current.sourceId ?? item.sourceId, current.url)
+          : { url: current.url, headers: current.headers };
+        if (!active || !container.current) return;
+        const originalUrl = resolved.url;
+        const url = streamUrl(settings, originalUrl, resolved.headers);
+        instance = new Artplayer({
+          container: container.current,
+          url,
+          volume: 0.8,
+          autoplay: true,
+          autoSize: false,
+          fullscreen: true,
+          fullscreenWeb: true,
+          pip: true,
+          playbackRate: true,
+          aspectRatio: true,
+          setting: true,
+          hotkey: true,
+          theme: '#ffffff',
+          lang: 'zh-cn',
+          plugins: [artplayerPluginDanmuku({
+            danmuku: async () => {
+              try {
+                const response = await window.lumen.danmaku(item.title, current.name);
+                if (active) setDanmakuLabel(response.comments.length
+                  ? `${response.comments.length} 条弹幕 · ${response.matches.length} 个源`
+                  : response.failures.length ? '弹幕源暂不可用' : '本集暂无弹幕');
+                return response.comments.map(({ text, time, mode, color }) => ({ text, time, mode, color }));
+              } catch {
+                if (active) setDanmakuLabel('弹幕加载失败');
+                return [];
+              }
+            },
+            speed: 5,
+            opacity: 0.78,
+            fontSize: 24,
+            margin: [10, '25%'],
+            antiOverlap: true,
+            synchronousPlayback: true,
+            heatmap: true,
+            emitter: false,
+          })],
+          type: /m3u8(?:$|\?)/i.test(originalUrl) ? 'm3u8' : undefined,
+          customType: {
+            m3u8: (video, sourceUrl, art) => {
+              attachHls(video, sourceUrl, art, settings.qualityPreference, setQualityLabel);
+            },
+          },
+        });
+        instance.on('video:timeupdate', () => {
+          if (Date.now() - lastSaved > 5000) {
+            lastSaved = Date.now();
+            saveProgress();
+          }
+        });
+        instance.on('video:pause', saveProgress);
+        instance.on('video:ended', () => {
+          if (episodeIndex + 1 < (lines[lineIndex]?.episodes.length ?? 0)) setEpisodeIndex((value) => value + 1);
+        });
+        instance.on('video:loadedmetadata', () => {
+          if (!instance) return;
+          const isResumeEpisode = resume?.episodeName === current.name && (!resume.lineName || resume.lineName === lines[lineIndex]?.name);
+          if (!resumeApplied && isResumeEpisode && resume.progress > 0 && (!resume.duration || resume.progress < resume.duration - 15)) {
+            resumeApplied = true;
+            instance.currentTime = Math.min(resume.progress, Math.max(0, instance.duration - 5));
+            setResumedAt(instance.currentTime);
+          }
+          if (!/m3u8(?:$|\?)/i.test(originalUrl) && instance.video.videoHeight > 0) setQualityLabel(`${instance.video.videoHeight}P`);
+        });
+        player.current = instance;
+      } catch {
+        if (active) setQualityLabel('规则解析失败');
       }
-    });
-    instance.on('video:pause', saveProgress);
-    instance.on('video:ended', () => {
-      if (episodeIndex + 1 < (lines[lineIndex]?.episodes.length ?? 0)) setEpisodeIndex((value) => value + 1);
-    });
-    instance.on('video:loadedmetadata', () => {
-      const isResumeEpisode = resume?.episodeName === current.name && (!resume.lineName || resume.lineName === lines[lineIndex]?.name);
-      if (!resumeApplied && isResumeEpisode && resume.progress > 0 && (!resume.duration || resume.progress < resume.duration - 15)) {
-        resumeApplied = true;
-        instance.currentTime = Math.min(resume.progress, Math.max(0, instance.duration - 5));
-        setResumedAt(instance.currentTime);
-      }
-      if (!/m3u8(?:$|\?)/i.test(originalUrl) && instance.video.videoHeight > 0) setQualityLabel(`${instance.video.videoHeight}P`);
-    });
-    player.current = instance;
-    return () => { active = false; saveProgress(); instance.destroy(false); player.current = null; };
-  }, [current?.url, lineIndex, episodeIndex, settings.proxyPort, settings.qualityPreference, onProgress]);
+    })();
+    return () => { active = false; saveProgress(); instance?.destroy(false); player.current = null; };
+  }, [current?.url, current?.sourceId, lineIndex, episodeIndex, settings.proxyPort, settings.proxyBaseUrl, settings.adFiltering, settings.qualityPreference, onProgress]);
 
   const toggleDanmaku = () => {
     const plugin = player.current?.plugins.artplayerPluginDanmuku as DanmakuPlugin | undefined;

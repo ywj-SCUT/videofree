@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { aggregateSearch, getDetail, importTvBox, resolveMedia, testSource } from './source-engine.js';
+import { aggregateSearch, getDetail, importTvBox, resolveMedia, resolvePlayback, testSource } from './source-engine.js';
 import { mergeLiveChannels, parseLivePlaylist } from './live-engine.js';
 import { fetchIptvCatalog } from './iptv-catalog.js';
 import { aggregateDanmaku } from './danmaku-engine.js';
@@ -167,6 +167,10 @@ function registerIpc(): void {
   ipcMain.handle('media:resolve', async (_event, item) => {
     const settings = storage.getSettings(proxy?.port ?? 0);
     return resolveMedia(settings.sources, item);
+  });
+  ipcMain.handle('media:play', async (_event, sourceId: string, token: string) => {
+    const settings = storage.getSettings(proxy?.port ?? 0);
+    return resolvePlayback(settings.sources, sourceId, token);
   });
   ipcMain.handle('media:danmaku', async (_event, title: string, episodeName: string) => {
     const settings = storage.getSettings(proxy?.port ?? 0);

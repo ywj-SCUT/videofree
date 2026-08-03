@@ -12,14 +12,15 @@ const defaultHeaders = {
   Accept: '*/*',
 };
 
-function proxiedUrl(port: number, target: string, referer?: string, filterAds = false): string {
+function proxiedUrl(port: number, target: string, referer?: string, filterAds = false, customHeaders?: Record<string, string>): string {
   const params = new URLSearchParams({ url: target });
   if (referer) params.set('referer', referer);
   if (filterAds) params.set('filterAds', '1');
+  if (customHeaders && Object.keys(customHeaders).length) params.set('headers', JSON.stringify(customHeaders));
   return `http://127.0.0.1:${port}/stream?${params}`;
 }
 
-function rewriteManifest(manifest: string, manifestUrl: string, port: number, referer?: string, filterAds = false): string {
+function rewriteManifest(manifest: string, manifestUrl: string, port: number, referer?: string, filterAds = false, customHeaders?: Record<string, string>): string {
   const base = new URL(manifestUrl);
   return manifest.split(/\r?\n/).map((line) => {
     const trimmed = line.trim();
@@ -27,15 +28,31 @@ function rewriteManifest(manifest: string, manifestUrl: string, port: number, re
     if (trimmed.startsWith('#')) {
       return line.replace(/URI="([^"]+)"/g, (_match, uri: string) => {
         const absolute = new URL(uri, base).toString();
-        return `URI="${proxiedUrl(port, absolute, referer ?? manifestUrl, filterAds)}"`;
+        return `URI="${proxiedUrl(port, absolute, referer ?? manifestUrl, filterAds, customHeaders)}"`;
       });
     }
     try {
-      return proxiedUrl(port, new URL(trimmed, base).toString(), referer ?? manifestUrl, filterAds);
+      return proxiedUrl(port, new URL(trimmed, base).toString(), referer ?? manifestUrl, filterAds, customHeaders);
     } catch {
       return line;
     }
   }).join('\n');
+}
+
+function playbackHeaders(value: string | null): Record<string, string> {
+  if (!value || value.length > 12_000) return {};
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const blocked = new Set(['host', 'content-length', 'connection', 'proxy-authorization', 'transfer-encoding', 'range']);
+    return Object.fromEntries(Object.entries(parsed).flatMap(([name, raw]) => {
+      const key = name.trim();
+      const headerValue = String(raw ?? '').trim();
+      if (!/^[a-z0-9-]{1,64}$/i.test(key) || blocked.has(key.toLowerCase()) || !headerValue || headerValue.length > 4096 || /[\r\n]/.test(headerValue)) return [];
+      return [[key, headerValue]];
+    }));
+  } catch {
+    return {};
+  }
 }
 
 function imageDimension(value: string | null, fallback: number): number {
@@ -174,7 +191,8 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
       return;
     }
     try {
-      const headers: Record<string, string> = { ...defaultHeaders };
+      const customHeaders = playbackHeaders(incoming.searchParams.get('headers'));
+      const headers: Record<string, string> = { ...defaultHeaders, ...customHeaders };
       const referer = incoming.searchParams.get('referer');
       const filterAds = incoming.searchParams.get('filterAds') === '1';
       if (referer) headers.Referer = referer;
@@ -196,7 +214,7 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
           'X-VideoGET-Ad-Seconds': filtered.removedDuration.toFixed(3),
           'X-VideoGET-Ad-Markers': String(filtered.removedMarkers),
         });
-        response.end(rewriteManifest(filtered.manifest, upstream.url || target, port, referer ?? target, filterAds));
+        response.end(rewriteManifest(filtered.manifest, upstream.url || target, port, referer ?? target, filterAds, customHeaders));
         return;
       }
       const forwarded = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control'];
