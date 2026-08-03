@@ -1,10 +1,10 @@
 # VideoGET
 
-VideoGET 是一个本地优先的 Windows 桌面影视聚合播放器。
+VideoGET 是一个本地优先的 Web 与 Windows 桌面影视聚合播放器。
 
 ## 当前能力
 
-- Electron + React + TypeScript 桌面应用
+- Next.js Web 应用与 Electron + React + TypeScript 桌面应用
 - Apple 风格的简约深色界面
 - CMS 多源聚合搜索与详情解析
 - TVBox type 1 配置导入
@@ -14,6 +14,7 @@ VideoGET 是一个本地优先的 Windows 桌面影视聚合播放器。
 - 电影、电视剧、动漫、短剧、AI 短剧分类
 - 收藏、观看记录和本地设置
 - IPTV/直播频道数据模型
+- 浏览器 localStorage 收藏、观看记录、断点续播和来源设置
 
 ## 开发
 
@@ -21,6 +22,20 @@ VideoGET 是一个本地优先的 Windows 桌面影视聚合播放器。
 npm install
 npm run typecheck
 npm run dev
+```
+
+Web 端开发与生产运行：
+
+```powershell
+npm run web:dev
+npm run web:build
+npm run web:start
+```
+
+Phase 1 完整冒烟门禁：
+
+```powershell
+npm run smoke:phase1
 ```
 
 ## 构建
@@ -35,4 +50,3 @@ npm run dist
 ## 内容来源
 
 内置内容仅用于验证搜索与播放链路。其他内容通过用户自行配置的 CMS、TVBox 或 Spider 规则接入。实际分辨率取决于来源提供的媒体流。
-

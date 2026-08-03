@@ -5,6 +5,7 @@ release/
 refs/
 *.tsbuildinfo
 *.log
+.next/
+.playwright-cli/
 .DS_Store
 Thumbs.db
-

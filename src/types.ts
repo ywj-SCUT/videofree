@@ -28,7 +28,7 @@ export interface LibraryState {
 }
 export interface AppSettings {
   sources: CmsSource[]; liveChannels: LiveChannel[];
-  qualityPreference: 'auto' | 'highest' | '1080p' | '720p'; proxyPort: number;
+  qualityPreference: 'auto' | 'highest' | '1080p' | '720p'; proxyPort: number; proxyBaseUrl?: string;
 }
 export interface LumenApi {
   search(query: string, category: MediaCategory): Promise<SearchResponse>;

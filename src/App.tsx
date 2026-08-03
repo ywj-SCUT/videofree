@@ -97,6 +97,12 @@ function imageUrl(source: string, proxyPort: number, width: number, height: numb
   return `http://127.0.0.1:${proxyPort}/image?${params}`;
 }
 
+function streamUrl(settings: AppSettings, source: string): string {
+  if (!/^https?:\/\//i.test(source)) return source;
+  if (settings.proxyBaseUrl) return `${settings.proxyBaseUrl}?url=${encodeURIComponent(source)}`;
+  return settings.proxyPort > 0 ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(source)}` : source;
+}
+
 function App() {
   const [view, setView] = useState<View>('discover');
   const [query, setQuery] = useState('');
@@ -411,8 +417,7 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
     setQualityLabel('检测画质');
     setResumedAt(0);
     const originalUrl = current.url;
-    const useProxy = settings.proxyPort > 0 && /^https?:\/\//i.test(originalUrl);
-    const url = useProxy ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(originalUrl)}` : originalUrl;
+    const url = streamUrl(settings, originalUrl);
     const instance = new Artplayer({
       container: container.current,
       url,
@@ -480,8 +485,7 @@ function LivePlayerSheet({ channel, settings, onClose }: { channel: LiveChannel;
   useEffect(() => {
     if (!container.current || !originalUrl) return;
     setStatus('正在连接');
-    const useProxy = settings.proxyPort > 0 && /^https?:\/\//i.test(originalUrl);
-    const url = useProxy ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(originalUrl)}` : originalUrl;
+    const url = streamUrl(settings, originalUrl);
     const instance = new Artplayer({
       container: container.current,
       url,

@@ -90,4 +90,5 @@ export interface AppSettings {
   liveChannels: LiveChannel[];
   qualityPreference: 'auto' | 'highest' | '1080p' | '720p';
   proxyPort: number;
+  proxyBaseUrl?: string;
 }
