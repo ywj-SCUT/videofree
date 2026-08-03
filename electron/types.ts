@@ -16,6 +16,7 @@ export interface MediaItem {
   sourceName: string;
   title: string;
   poster: string;
+  backdrop?: string;
   year?: string;
   remarks?: string;
   category: MediaCategory;

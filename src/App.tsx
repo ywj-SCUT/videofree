@@ -30,6 +30,12 @@ const navItems: Array<{ id: View; label: string; icon: typeof Compass }> = [
 const emptySettings: AppSettings = { sources: [], liveChannels: [], qualityPreference: 'highest', proxyPort: 0 };
 const emptyLibrary: LibraryState = { favorites: [], history: [] };
 
+function imageUrl(source: string, proxyPort: number, width: number, height: number): string {
+  if (!source || !proxyPort || !/^https?:\/\//i.test(source)) return source;
+  const params = new URLSearchParams({ url: source, w: String(width), h: String(height) });
+  return `http://127.0.0.1:${proxyPort}/image?${params}`;
+}
+
 function App() {
   const [view, setView] = useState<View>('discover');
   const [query, setQuery] = useState('');
@@ -137,14 +143,14 @@ function App() {
       </aside>
 
       <main className="main-content">
-        {view === 'discover' && <Discover items={items} loading={loading} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} onSearch={() => navigate('search')} />}
+        {view === 'discover' && <Discover items={items} loading={loading} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} onSearch={() => navigate('search')} proxyPort={settings.proxyPort} />}
         {view === 'search' && (
           <SearchView query={query} setQuery={setQuery} category={category} setCategory={setCategory} items={items} loading={loading}
-            meta={searchMeta} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} />
+            meta={searchMeta} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} proxyPort={settings.proxyPort} />
         )}
-        {view === 'shorts' && <ShortsView items={items} loading={loading} onOpen={openMedia} onMode={(mode) => { setCategory(mode); void searchMedia('', mode); }} mode={category} />}
+        {view === 'shorts' && <ShortsView items={items} loading={loading} onOpen={openMedia} onMode={(mode) => { setCategory(mode); void searchMedia('', mode); }} mode={category} proxyPort={settings.proxyPort} />}
         {view === 'live' && <LiveView settings={settings} onOpenSettings={() => navigate('settings')} />}
-        {view === 'library' && <LibraryView library={library} activeTab={activeTab} setActiveTab={setActiveTab} onOpen={openMedia} onRemove={toggleFavorite} />}
+        {view === 'library' && <LibraryView library={library} activeTab={activeTab} setActiveTab={setActiveTab} onOpen={openMedia} onRemove={toggleFavorite} proxyPort={settings.proxyPort} />}
         {view === 'settings' && <SettingsView settings={settings} onSettings={setSettings} />}
       </main>
 
@@ -160,15 +166,15 @@ function TitleBar() {
   return <div className="titlebar"><span>VideoGET</span><div className="window-actions"><button onClick={() => window.lumen.minimize()}><Minus size={14} /></button><button onClick={() => window.lumen.maximize()}><Maximize2 size={13} /></button><button className="close" onClick={() => window.lumen.close()}><X size={15} /></button></div></div>;
 }
 
-function Discover({ items, loading, onOpen, favoriteKeys, onFavorite, onSearch }: MediaGridProps & { onSearch: () => void }) {
+function Discover({ items, loading, onOpen, favoriteKeys, onFavorite, onSearch, proxyPort }: MediaGridProps & { onSearch: () => void }) {
   const featured = items[0];
   return <div className="page discover-page">
     <header className="page-header"><div><span className="eyebrow">今晚看什么</span><h1>发现好内容</h1></div><button className="search-launcher" onClick={onSearch}><Search size={17} /><span>搜索电影、剧集、动漫、短剧</span><kbd>Ctrl K</kbd></button></header>
-    {featured && <section className="featured" style={{ backgroundImage: `linear-gradient(90deg, rgba(8,8,10,.94) 0%, rgba(8,8,10,.6) 48%, rgba(8,8,10,.12) 100%), url(${featured.poster})` }}>
+    {featured && <section className="featured" style={{ backgroundImage: `linear-gradient(90deg, rgba(8,8,10,.94) 0%, rgba(8,8,10,.6) 48%, rgba(8,8,10,.12) 100%), url("${imageUrl(featured.backdrop ?? featured.poster, proxyPort, 1600, 900)}")` }}>
       <div className="featured-content"><span className="featured-kicker">开放影院精选</span><h2>{featured.title}</h2><p>{featured.summary}</p><div className="featured-meta"><span>{featured.year}</span><span>{featured.quality}</span><span>{featured.remarks}</span></div><button className="primary-button" onClick={() => onOpen(featured)}><Play size={17} fill="currentColor" />立即播放</button></div>
     </section>}
     <SectionHeader title="最近精选" subtitle="开放内容与已配置来源" />
-    <MediaGrid items={items} loading={loading} onOpen={onOpen} favoriteKeys={favoriteKeys} onFavorite={onFavorite} />
+    <MediaGrid items={items} loading={loading} onOpen={onOpen} favoriteKeys={favoriteKeys} onFavorite={onFavorite} proxyPort={proxyPort} />
   </div>;
 }
 
@@ -181,9 +187,9 @@ function SearchView({ query, setQuery, category, setCategory, items, loading, me
   </div>;
 }
 
-function ShortsView({ items, loading, onOpen, mode, onMode }: { items: MediaItem[]; loading: boolean; onOpen: (item: MediaItem) => void; mode: MediaCategory; onMode: (mode: MediaCategory) => void }) {
+function ShortsView({ items, loading, onOpen, mode, onMode, proxyPort }: { items: MediaItem[]; loading: boolean; onOpen: (item: MediaItem) => void; mode: MediaCategory; onMode: (mode: MediaCategory) => void; proxyPort: number }) {
   return <div className="page"><header className="page-header"><div><span className="eyebrow">短内容</span><h1>短剧流</h1></div><div className="segmented-control compact"><button className={mode === 'short' ? 'selected' : ''} onClick={() => onMode('short')}>短剧</button><button className={mode === 'ai-short' ? 'selected' : ''} onClick={() => onMode('ai-short')}>AI 短剧</button></div></header>
-    {loading ? <LoadingGrid /> : items.length ? <div className="short-grid">{items.map((item) => <button className="short-card" key={`${item.sourceId}:${item.id}`} onClick={() => onOpen(item)}><img src={item.poster} alt="" /><span className="short-overlay"><Play size={22} fill="currentColor" /><strong>{item.title}</strong><small>{item.remarks || item.sourceName}</small></span></button>)}</div> : <EmptyState icon={Sparkles} title="这个频道还没有内容" text="在设置中导入包含短剧分类的视频源。" />}
+    {loading ? <LoadingGrid /> : items.length ? <div className="short-grid">{items.map((item) => <button className="short-card" key={`${item.sourceId}:${item.id}`} onClick={() => onOpen(item)}><img src={imageUrl(item.poster, proxyPort, 800, 1200)} alt="" /><span className="short-overlay"><Play size={22} fill="currentColor" /><strong>{item.title}</strong><small>{item.remarks || item.sourceName}</small></span></button>)}</div> : <EmptyState icon={Sparkles} title="这个频道还没有内容" text="在设置中导入包含短剧分类的视频源。" />}
   </div>;
 }
 
@@ -193,13 +199,13 @@ function LiveView({ settings, onOpenSettings }: { settings: AppSettings; onOpenS
   </div>;
 }
 
-function LibraryView({ library, activeTab, setActiveTab, onOpen, onRemove }: { library: LibraryState; activeTab: 'favorites' | 'history'; setActiveTab: (tab: 'favorites' | 'history') => void; onOpen: (item: MediaItem) => void; onRemove: (item: MediaItem) => void }) {
+function LibraryView({ library, activeTab, setActiveTab, onOpen, onRemove, proxyPort }: { library: LibraryState; activeTab: 'favorites' | 'history'; setActiveTab: (tab: 'favorites' | 'history') => void; onOpen: (item: MediaItem) => void; onRemove: (item: MediaItem) => void; proxyPort: number }) {
   const visible: Array<MediaItem | LibraryState['history'][number]> = activeTab === 'favorites' ? library.favorites : library.history;
   return <div className="page"><header className="page-header"><div><span className="eyebrow">只保存在本机</span><h1>我的片库</h1></div></header>
     <div className="segmented-control compact"><button className={activeTab === 'favorites' ? 'selected' : ''} onClick={() => setActiveTab('favorites')}><Heart size={15} />收藏</button><button className={activeTab === 'history' ? 'selected' : ''} onClick={() => setActiveTab('history')}><Clock3 size={15} />观看记录</button></div>
     {visible.length ? <div className="library-list">{visible.map((item) => {
       const historyItem = 'watchedAt' in item ? item as LibraryState['history'][number] : null;
-      return <div className="library-row" key={`${item.sourceId}:${item.id}`}><img src={item.poster} alt="" /><button className="library-info" onClick={() => onOpen(item)}><strong>{item.title}</strong><span>{historyItem?.episodeName ?? item.remarks}</span>{historyItem && historyItem.duration > 0 && <i style={{ width: `${Math.min(100, historyItem.progress / historyItem.duration * 100)}%` }} />}</button><span className="source-pill">{item.sourceName}</span>{activeTab === 'favorites' && <button className="icon-button" onClick={() => onRemove(item)}><Trash2 size={16} /></button>}</div>;
+      return <div className="library-row" key={`${item.sourceId}:${item.id}`}><img src={imageUrl(item.poster, proxyPort, 240, 360)} alt="" /><button className="library-info" onClick={() => onOpen(item)}><strong>{item.title}</strong><span>{historyItem?.episodeName ?? item.remarks}</span>{historyItem && historyItem.duration > 0 && <i style={{ width: `${Math.min(100, historyItem.progress / historyItem.duration * 100)}%` }} />}</button><span className="source-pill">{item.sourceName}</span>{activeTab === 'favorites' && <button className="icon-button" onClick={() => onRemove(item)}><Trash2 size={16} /></button>}</div>;
     })}</div> : <EmptyState icon={activeTab === 'favorites' ? Heart : Clock3} title={activeTab === 'favorites' ? '收藏还是空的' : '还没有观看记录'} text="播放或收藏的影片会安全地保存在本机。" />}
   </div>;
 }
@@ -247,11 +253,11 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
   </div>;
 }
 
-interface MediaGridProps { items: MediaItem[]; loading: boolean; onOpen: (item: MediaItem) => void; favoriteKeys: Set<string>; onFavorite: (item: MediaItem) => void }
-function MediaGrid({ items, loading, onOpen, favoriteKeys, onFavorite }: MediaGridProps) {
+interface MediaGridProps { items: MediaItem[]; loading: boolean; onOpen: (item: MediaItem) => void; favoriteKeys: Set<string>; onFavorite: (item: MediaItem) => void; proxyPort: number }
+function MediaGrid({ items, loading, onOpen, favoriteKeys, onFavorite, proxyPort }: MediaGridProps) {
   if (loading && !items.length) return <LoadingGrid />;
   if (!items.length) return <EmptyState icon={Search} title="没有找到相关内容" text="换个关键词，或在设置中添加更多视频来源。" />;
-  return <div className="media-grid">{items.map((item) => <article className="media-card" key={`${item.sourceId}:${item.id}`}><button className="poster-button" onClick={() => onOpen(item)}><img src={item.poster} alt={item.title} loading="lazy" /><span className="poster-shade" /><span className="play-button"><Play size={20} fill="currentColor" /></span>{item.quality && <span className="quality-badge">{item.quality}</span>}<span className="source-badge">{item.sourceName}</span></button><div className="media-info"><button onClick={() => onOpen(item)}><strong>{item.title}</strong><span>{[item.year, item.remarks].filter(Boolean).join(' · ')}</span></button><button className={favoriteKeys.has(`${item.sourceId}:${item.id}`) ? 'heart-button active' : 'heart-button'} onClick={() => onFavorite(item)}><Heart size={16} fill={favoriteKeys.has(`${item.sourceId}:${item.id}`) ? 'currentColor' : 'none'} /></button></div></article>)}</div>;
+  return <div className="media-grid">{items.map((item) => <article className="media-card" key={`${item.sourceId}:${item.id}`}><button className="poster-button" onClick={() => onOpen(item)}><img src={imageUrl(item.poster, proxyPort, 800, 1200)} alt={item.title} loading="lazy" /><span className="poster-shade" /><span className="play-button"><Play size={20} fill="currentColor" /></span>{item.quality && <span className="quality-badge">{item.quality}</span>}<span className="source-badge">{item.sourceName}</span></button><div className="media-info"><button onClick={() => onOpen(item)}><strong>{item.title}</strong><span>{[item.year, item.remarks].filter(Boolean).join(' · ')}</span></button><button className={favoriteKeys.has(`${item.sourceId}:${item.id}`) ? 'heart-button active' : 'heart-button'} onClick={() => onFavorite(item)}><Heart size={16} fill={favoriteKeys.has(`${item.sourceId}:${item.id}`) ? 'currentColor' : 'none'} /></button></div></article>)}</div>;
 }
 
 function LoadingGrid() { return <div className="media-grid">{Array.from({ length: 10 }, (_, index) => <div className="media-card skeleton" key={index}><div className="skeleton-poster" /><div className="skeleton-line" /><div className="skeleton-line short" /></div>)}</div>; }

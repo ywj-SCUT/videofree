@@ -90,7 +90,7 @@ function registerIpc(): void {
 app.whenReady().then(async () => {
   app.setAppUserModelId('com.videoget.desktop');
   await storage.init();
-  proxy = await startProxyServer();
+  proxy = await startProxyServer(path.join(app.getPath('userData'), 'image-cache'));
   registerIpc();
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

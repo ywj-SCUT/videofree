@@ -3,6 +3,7 @@ export interface Episode { name: string; url: string }
 export interface PlayLine { name: string; episodes: Episode[] }
 export interface MediaItem {
   id: string; sourceId: string; sourceName: string; title: string; poster: string;
+  backdrop?: string;
   year?: string; remarks?: string; category: MediaCategory; summary?: string;
   actors?: string; director?: string; area?: string; playLines?: PlayLine[]; quality?: string;
 }
