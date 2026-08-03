@@ -11,6 +11,8 @@
     "smoke:sources": "npm run build && node scripts/source-smoke.mjs",
     "smoke:live": "npm run build && node scripts/live-smoke.mjs",
     "smoke:aggregation": "npm run build && node scripts/aggregation-smoke.mjs",
+    "smoke:tvbox": "npm run build && node scripts/tvbox-smoke.mjs",
+    "smoke:phase1": "npm run build && node scripts/tvbox-smoke.mjs && node scripts/aggregation-smoke.mjs && node scripts/source-smoke.mjs",
     "dist": "npm run build && electron-builder --win nsis portable",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit"
   },
@@ -49,6 +51,7 @@
     ],
     "asar": true,
     "win": {
+      "icon": "public/videoget-icon.png",
       "target": [
         {
           "target": "nsis",
@@ -62,14 +65,17 @@
             "x64"
           ]
         }
-      ],
-      "artifactName": "VideoGET-${version}-${arch}.${ext}"
+      ]
     },
     "nsis": {
+      "artifactName": "VideoGET-Setup-${version}-${arch}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "VideoGET-Portable-${version}-${arch}.${ext}"
     }
   },
   "allowScripts": {}

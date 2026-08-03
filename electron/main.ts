@@ -9,6 +9,13 @@ import { Storage } from './storage.js';
 import type { CmsSource, ImportResult, LibraryState, LiveChannel, MediaCategory } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const isAutomationRun = process.argv.some((argument) => argument.startsWith('--remote-debugging-port='));
+if (isAutomationRun) {
+  const userDataArgument = process.argv.find((argument) => argument.startsWith('--user-data-dir='));
+  const userDataPath = userDataArgument?.slice('--user-data-dir='.length)
+    || (process.env.APPDATA ? path.join(process.env.APPDATA, 'VideoGET') : '');
+  if (userDataPath) app.setPath('userData', path.resolve(userDataPath));
+}
 let mainWindow: BrowserWindow | null = null;
 let proxy: Awaited<ReturnType<typeof startProxyServer>> | null = null;
 const storage = new Storage();

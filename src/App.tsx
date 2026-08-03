@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
 import {
-  Check, ChevronDown, Clock3, Compass, Film, Heart, Library, LoaderCircle,
+  Check, ChevronDown, Clock3, Compass, Film, Heart, LoaderCircle,
   Maximize2, Minimize2, Minus, MonitorPlay, Play, Plus, Radio, Search,
   Settings, Sparkles, Star, Trash2, Tv, Upload, X,
 } from 'lucide-react';
-import type { AppSettings, CmsSource, LibraryState, LiveChannel, MediaCategory, MediaItem } from './types';
+import type { AppSettings, CmsSource, HistoryItem, LibraryState, LiveChannel, MediaCategory, MediaItem } from './types';
 
-type View = 'discover' | 'search' | 'shorts' | 'live' | 'library' | 'settings';
+type View = 'discover' | 'search' | 'shorts' | 'live' | 'favorites' | 'history' | 'settings';
 
 const categories: Array<{ value: MediaCategory; label: string }> = [
   { value: 'all', label: '全部' },
@@ -24,7 +24,8 @@ const navItems: Array<{ id: View; label: string; icon: typeof Compass }> = [
   { id: 'search', label: '搜索', icon: Search },
   { id: 'shorts', label: '短剧', icon: Sparkles },
   { id: 'live', label: '直播', icon: Radio },
-  { id: 'library', label: '片库', icon: Library },
+  { id: 'favorites', label: '收藏', icon: Heart },
+  { id: 'history', label: '观看记录', icon: Clock3 },
 ];
 
 const emptySettings: AppSettings = { sources: [], liveChannels: [], qualityPreference: 'highest', proxyPort: 0 };
@@ -106,9 +107,11 @@ function App() {
   const [settings, setSettings] = useState<AppSettings>(emptySettings);
   const [library, setLibrary] = useState<LibraryState>(emptyLibrary);
   const [selected, setSelected] = useState<MediaItem | null>(null);
+  const [resume, setResume] = useState<HistoryItem | null>(null);
   const [selectedLive, setSelectedLive] = useState<LiveChannel | null>(null);
-  const [activeTab, setActiveTab] = useState<'favorites' | 'history'>('favorites');
   const searchTimer = useRef<number>();
+  const libraryRef = useRef<LibraryState>(emptyLibrary);
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
 
   const searchMedia = useCallback(async (nextQuery: string, nextCategory: MediaCategory) => {
     setLoading(true);
@@ -125,6 +128,7 @@ function App() {
     void Promise.all([window.lumen.getSettings(), window.lumen.getLibrary()]).then(([nextSettings, nextLibrary]) => {
       setSettings(nextSettings);
       setLibrary(nextLibrary);
+      libraryRef.current = nextLibrary;
     });
     void searchMedia('', 'all');
   }, [searchMedia]);
@@ -148,33 +152,50 @@ function App() {
     }
   };
 
-  const openMedia = async (item: MediaItem) => {
+  const openMedia = async (item: MediaItem, historyItem?: HistoryItem) => {
     setLoading(true);
     try {
       const detail = await window.lumen.resolve(item);
+      setResume(historyItem ?? null);
       setSelected(detail ?? item);
     } finally {
       setLoading(false);
     }
   };
 
-  const saveLibrary = async (next: LibraryState) => {
+  const updateLibrary = useCallback((updater: (current: LibraryState) => LibraryState) => {
+    const next = updater(libraryRef.current);
+    libraryRef.current = next;
     setLibrary(next);
-    await window.lumen.saveLibrary(next);
-  };
+    saveQueue.current = saveQueue.current
+      .catch(() => undefined)
+      .then(() => window.lumen.saveLibrary(next));
+  }, []);
 
   const toggleFavorite = (item: MediaItem) => {
-    const exists = library.favorites.some((entry) => entry.id === item.id && entry.sourceId === item.sourceId);
-    const favorites = exists
-      ? library.favorites.filter((entry) => !(entry.id === item.id && entry.sourceId === item.sourceId))
-      : [item, ...library.favorites];
-    void saveLibrary({ ...library, favorites });
+    updateLibrary((current) => {
+      const exists = current.favorites.some((entry) => entry.id === item.id && entry.sourceId === item.sourceId);
+      const favorites = exists
+        ? current.favorites.filter((entry) => !(entry.id === item.id && entry.sourceId === item.sourceId))
+        : [item, ...current.favorites];
+      return { ...current, favorites };
+    });
   };
 
-  const updateProgress = (item: MediaItem, progress: number, duration: number, episodeName: string) => {
-    const rest = library.history.filter((entry) => !(entry.id === item.id && entry.sourceId === item.sourceId));
-    void saveLibrary({ ...library, history: [{ ...item, progress, duration, episodeName, watchedAt: Date.now() }, ...rest].slice(0, 100) });
-  };
+  const updateProgress = useCallback((item: MediaItem, progress: number, duration: number, lineName: string, episodeName: string) => {
+    updateLibrary((current) => {
+      const rest = current.history.filter((entry) => !(entry.id === item.id && entry.sourceId === item.sourceId));
+      const historyItem: HistoryItem = { ...item, progress, duration, lineName, episodeName, watchedAt: Date.now() };
+      return { ...current, history: [historyItem, ...rest].slice(0, 100) };
+    });
+  }, [updateLibrary]);
+
+  const removeHistory = (item: MediaItem) => updateLibrary((current) => ({
+    ...current,
+    history: current.history.filter((entry) => !(entry.id === item.id && entry.sourceId === item.sourceId)),
+  }));
+
+  const clearLibrarySection = (section: 'favorites' | 'history') => updateLibrary((current) => ({ ...current, [section]: [] }));
 
   const favoriteKeys = useMemo(() => new Set(library.favorites.map((item) => `${item.sourceId}:${item.id}`)), [library.favorites]);
 
@@ -190,6 +211,8 @@ function App() {
           {navItems.map(({ id, label, icon: Icon }) => (
             <button key={id} className={view === id ? 'nav-item active' : 'nav-item'} onClick={() => navigate(id)}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
+              {id === 'favorites' && library.favorites.length > 0 && <small>{library.favorites.length}</small>}
+              {id === 'history' && library.history.length > 0 && <small>{library.history.length}</small>}
             </button>
           ))}
         </nav>
@@ -209,15 +232,16 @@ function App() {
           <SearchView query={query} setQuery={setQuery} category={category} setCategory={setCategory} items={items} loading={loading}
             meta={searchMeta} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} proxyPort={settings.proxyPort} />
         )}
-        {view === 'shorts' && <ShortsView items={items} loading={loading} onOpen={openMedia} onMode={(mode) => { setCategory(mode); void searchMedia('', mode); }} mode={category} proxyPort={settings.proxyPort} />}
+        {view === 'shorts' && <ShortsView items={items} loading={loading} onOpen={openMedia} onMode={(mode) => { setCategory(mode); void searchMedia('', mode); }} mode={category} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} proxyPort={settings.proxyPort} />}
         {view === 'live' && <LiveView settings={settings} onOpenSettings={() => navigate('settings')} onPlay={setSelectedLive} />}
-        {view === 'library' && <LibraryView library={library} activeTab={activeTab} setActiveTab={setActiveTab} onOpen={openMedia} onRemove={toggleFavorite} proxyPort={settings.proxyPort} />}
+        {view === 'favorites' && <LibraryView mode="favorites" items={library.favorites} onOpen={openMedia} onRemove={toggleFavorite} onClear={() => clearLibrarySection('favorites')} proxyPort={settings.proxyPort} />}
+        {view === 'history' && <LibraryView mode="history" items={library.history} onOpen={openMedia} onRemove={removeHistory} onClear={() => clearLibrarySection('history')} proxyPort={settings.proxyPort} />}
         {view === 'settings' && <SettingsView settings={settings} onSettings={setSettings} />}
       </main>
 
       {selected && (
         <PlayerSheet item={selected} settings={settings} isFavorite={favoriteKeys.has(`${selected.sourceId}:${selected.id}`)}
-          onClose={() => setSelected(null)} onFavorite={() => toggleFavorite(selected)} onProgress={updateProgress} />
+          resume={resume} onClose={() => { setSelected(null); setResume(null); }} onFavorite={() => toggleFavorite(selected)} onProgress={updateProgress} />
       )}
       {selectedLive && <LivePlayerSheet channel={selectedLive} settings={settings} onClose={() => setSelectedLive(null)} />}
     </div>
@@ -249,9 +273,9 @@ function SearchView({ query, setQuery, category, setCategory, items, loading, me
   </div>;
 }
 
-function ShortsView({ items, loading, onOpen, mode, onMode, proxyPort }: { items: MediaItem[]; loading: boolean; onOpen: (item: MediaItem) => void; mode: MediaCategory; onMode: (mode: MediaCategory) => void; proxyPort: number }) {
+function ShortsView({ items, loading, onOpen, mode, onMode, favoriteKeys, onFavorite, proxyPort }: { items: MediaItem[]; loading: boolean; onOpen: (item: MediaItem) => void; mode: MediaCategory; onMode: (mode: MediaCategory) => void; favoriteKeys: Set<string>; onFavorite: (item: MediaItem) => void; proxyPort: number }) {
   return <div className="page"><header className="page-header"><div><span className="eyebrow">短内容</span><h1>短剧流</h1></div><div className="segmented-control compact"><button className={mode === 'short' ? 'selected' : ''} onClick={() => onMode('short')}>短剧</button><button className={mode === 'ai-short' ? 'selected' : ''} onClick={() => onMode('ai-short')}>AI 短剧</button></div></header>
-    {loading ? <LoadingGrid /> : items.length ? <div className="short-grid">{items.map((item) => <button className="short-card" key={`${item.sourceId}:${item.id}`} onClick={() => onOpen(item)}><img src={imageUrl(item.poster, proxyPort, 800, 1200)} alt="" /><span className="short-overlay"><Play size={22} fill="currentColor" /><strong>{item.title}</strong><small>{item.remarks || item.sourceName}</small></span></button>)}</div> : <EmptyState icon={Sparkles} title="这个频道还没有内容" text="在设置中导入包含短剧分类的视频源。" />}
+    {loading ? <LoadingGrid /> : items.length ? <div className="short-grid">{items.map((item) => { const favorite = favoriteKeys.has(`${item.sourceId}:${item.id}`); return <article className="short-card-wrap" key={`${item.sourceId}:${item.id}`}><button className="short-card" onClick={() => onOpen(item)}><img src={imageUrl(item.poster, proxyPort, 800, 1200)} alt="" /><span className="short-overlay"><Play size={22} fill="currentColor" /><strong>{item.title}</strong><small>{item.remarks || item.sourceName}</small></span></button><button className={favorite ? 'short-favorite active' : 'short-favorite'} aria-label={favorite ? '取消收藏' : '收藏'} title={favorite ? '取消收藏' : '收藏'} onClick={() => onFavorite(item)}><Heart size={17} fill={favorite ? 'currentColor' : 'none'} /></button></article>; })}</div> : <EmptyState icon={Sparkles} title="这个频道还没有内容" text="在设置中导入包含短剧分类的视频源。" />}
   </div>;
 }
 
@@ -272,14 +296,22 @@ function LiveView({ settings, onOpenSettings, onPlay }: { settings: AppSettings;
   </div>;
 }
 
-function LibraryView({ library, activeTab, setActiveTab, onOpen, onRemove, proxyPort }: { library: LibraryState; activeTab: 'favorites' | 'history'; setActiveTab: (tab: 'favorites' | 'history') => void; onOpen: (item: MediaItem) => void; onRemove: (item: MediaItem) => void; proxyPort: number }) {
-  const visible: Array<MediaItem | LibraryState['history'][number]> = activeTab === 'favorites' ? library.favorites : library.history;
-  return <div className="page"><header className="page-header"><div><span className="eyebrow">只保存在本机</span><h1>我的片库</h1></div></header>
-    <div className="segmented-control compact"><button className={activeTab === 'favorites' ? 'selected' : ''} onClick={() => setActiveTab('favorites')}><Heart size={15} />收藏</button><button className={activeTab === 'history' ? 'selected' : ''} onClick={() => setActiveTab('history')}><Clock3 size={15} />观看记录</button></div>
-    {visible.length ? <div className="library-list">{visible.map((item) => {
-      const historyItem = 'watchedAt' in item ? item as LibraryState['history'][number] : null;
-      return <div className="library-row" key={`${item.sourceId}:${item.id}`}><img src={imageUrl(item.poster, proxyPort, 240, 360)} alt="" /><button className="library-info" onClick={() => onOpen(item)}><strong>{item.title}</strong><span>{historyItem?.episodeName ?? item.remarks}</span>{historyItem && historyItem.duration > 0 && <i style={{ width: `${Math.min(100, historyItem.progress / historyItem.duration * 100)}%` }} />}</button><span className="source-pill">{item.sourceName}</span>{activeTab === 'favorites' && <button className="icon-button" onClick={() => onRemove(item)}><Trash2 size={16} /></button>}</div>;
-    })}</div> : <EmptyState icon={activeTab === 'favorites' ? Heart : Clock3} title={activeTab === 'favorites' ? '收藏还是空的' : '还没有观看记录'} text="播放或收藏的影片会安全地保存在本机。" />}
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '00:00';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = Math.floor(seconds % 60);
+  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}` : `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
+}
+
+function LibraryView({ mode, items, onOpen, onRemove, onClear, proxyPort }: { mode: 'favorites' | 'history'; items: MediaItem[] | HistoryItem[]; onOpen: (item: MediaItem, historyItem?: HistoryItem) => void; onRemove: (item: MediaItem) => void; onClear: () => void; proxyPort: number }) {
+  const isHistory = mode === 'history';
+  return <div className="page"><header className="page-header"><div><span className="eyebrow">只保存在本机</span><h1>{isHistory ? '观看记录' : '我的收藏'}</h1><p className="page-description">{isHistory ? '继续上次的线路、剧集和播放位置' : '保存想看的内容，随时继续播放'}</p></div>{items.length > 0 && <button className="secondary-button danger-text" onClick={() => { if (window.confirm(isHistory ? '清空全部观看记录？' : '清空全部收藏？')) onClear(); }}><Trash2 size={15} />全部清空</button>}</header>
+    {items.length ? <div className="library-list">{items.map((item) => {
+      const historyItem = isHistory ? item as HistoryItem : null;
+      const progress = historyItem && historyItem.duration > 0 ? Math.min(100, historyItem.progress / historyItem.duration * 100) : 0;
+      return <div className="library-row" key={`${item.sourceId}:${item.id}`}><img src={imageUrl(item.poster, proxyPort, 240, 360)} alt="" /><button className="library-info" onClick={() => onOpen(item, historyItem ?? undefined)}><strong>{item.title}</strong><span>{historyItem ? `${historyItem.episodeName ?? '上次播放'} · ${formatTime(historyItem.progress)} / ${formatTime(historyItem.duration)}` : item.remarks}</span>{historyItem && <small>继续播放</small>}{progress > 0 && <i style={{ width: `${progress}%` }} />}</button><span className="source-pill">{item.sourceName}</span><button className="icon-button" aria-label={isHistory ? '删除观看记录' : '取消收藏'} title={isHistory ? '删除观看记录' : '取消收藏'} onClick={() => onRemove(item)}><Trash2 size={16} /></button></div>;
+    })}</div> : <EmptyState icon={isHistory ? Clock3 : Heart} title={isHistory ? '还没有观看记录' : '收藏还是空的'} text={isHistory ? '开始播放后会自动保存剧集和播放位置。' : '点击影片旁的心形按钮即可收藏。'} />}
   </div>;
 }
 
@@ -358,18 +390,26 @@ function LoadingGrid() { return <div className="media-grid">{Array.from({ length
 function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) { return <div className="section-header"><div><h2>{title}</h2><p>{subtitle}</p></div><ChevronDown size={17} /></div>; }
 function EmptyState({ icon: Icon, title, text, action }: { icon: typeof Search; title: string; text: string; action?: React.ReactNode }) { return <div className="empty-state"><span><Icon size={26} /></span><h2>{title}</h2><p>{text}</p>{action}</div>; }
 
-function PlayerSheet({ item, settings, isFavorite, onClose, onFavorite, onProgress }: { item: MediaItem; settings: AppSettings; isFavorite: boolean; onClose: () => void; onFavorite: () => void; onProgress: (item: MediaItem, progress: number, duration: number, episodeName: string) => void }) {
+function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, onProgress }: { item: MediaItem; settings: AppSettings; isFavorite: boolean; resume: HistoryItem | null; onClose: () => void; onFavorite: () => void; onProgress: (item: MediaItem, progress: number, duration: number, lineName: string, episodeName: string) => void }) {
   const lines = item.playLines ?? [];
-  const [lineIndex, setLineIndex] = useState(0);
-  const [episodeIndex, setEpisodeIndex] = useState(0);
+  const resumePosition = useMemo(() => {
+    if (!resume) return { lineIndex: 0, episodeIndex: 0 };
+    const matchedLine = Math.max(0, lines.findIndex((line) => line.name === resume.lineName && line.episodes.some((episode) => episode.name === resume.episodeName)));
+    const matchedEpisode = Math.max(0, lines[matchedLine]?.episodes.findIndex((episode) => episode.name === resume.episodeName) ?? 0);
+    return { lineIndex: matchedLine, episodeIndex: matchedEpisode };
+  }, [item.sourceId, item.id, resume?.watchedAt]);
+  const [lineIndex, setLineIndex] = useState(resumePosition.lineIndex);
+  const [episodeIndex, setEpisodeIndex] = useState(resumePosition.episodeIndex);
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Artplayer | null>(null);
   const [qualityLabel, setQualityLabel] = useState('检测画质');
+  const [resumedAt, setResumedAt] = useState(0);
   const current = lines[lineIndex]?.episodes[episodeIndex];
 
   useEffect(() => {
     if (!container.current || !current) return;
     setQualityLabel('检测画质');
+    setResumedAt(0);
     const originalUrl = current.url;
     const useProxy = settings.proxyPort > 0 && /^https?:\/\//i.test(originalUrl);
     const url = useProxy ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(originalUrl)}` : originalUrl;
@@ -396,24 +436,37 @@ function PlayerSheet({ item, settings, isFavorite, onClose, onFavorite, onProgre
       },
     });
     let lastSaved = 0;
+    let resumeApplied = false;
+    const saveProgress = () => {
+      if (instance.currentTime > 0 && Number.isFinite(instance.currentTime)) {
+        onProgress(item, instance.currentTime, instance.duration || 0, lines[lineIndex]?.name ?? '', current.name);
+      }
+    };
     instance.on('video:timeupdate', () => {
       if (Date.now() - lastSaved > 5000) {
         lastSaved = Date.now();
-        onProgress(item, instance.currentTime, instance.duration || 0, current.name);
+        saveProgress();
       }
     });
+    instance.on('video:pause', saveProgress);
     instance.on('video:ended', () => {
       if (episodeIndex + 1 < (lines[lineIndex]?.episodes.length ?? 0)) setEpisodeIndex((value) => value + 1);
     });
     instance.on('video:loadedmetadata', () => {
+      const isResumeEpisode = resume?.episodeName === current.name && (!resume.lineName || resume.lineName === lines[lineIndex]?.name);
+      if (!resumeApplied && isResumeEpisode && resume.progress > 0 && (!resume.duration || resume.progress < resume.duration - 15)) {
+        resumeApplied = true;
+        instance.currentTime = Math.min(resume.progress, Math.max(0, instance.duration - 5));
+        setResumedAt(instance.currentTime);
+      }
       if (!/m3u8(?:$|\?)/i.test(originalUrl) && instance.video.videoHeight > 0) setQualityLabel(`${instance.video.videoHeight}P`);
     });
     player.current = instance;
-    return () => { instance.destroy(false); player.current = null; };
-  }, [current?.url, lineIndex, episodeIndex, settings.proxyPort, settings.qualityPreference]);
+    return () => { saveProgress(); instance.destroy(false); player.current = null; };
+  }, [current?.url, lineIndex, episodeIndex, settings.proxyPort, settings.qualityPreference, onProgress]);
 
-  return <div className="player-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="player-sheet"><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title}</h2></div><div><small className="player-status">{qualityLabel}</small><button className={isFavorite ? 'icon-button active' : 'icon-button'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" onClick={onClose}><X size={20} /></button></div></header>
-    {current ? <><div className={item.category === 'short' || item.category === 'ai-short' ? 'player-stage vertical-mode' : 'player-stage'} ref={container} /><div className="player-controls"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div></> : <EmptyState icon={Film} title="暂无可播放线路" text="当前来源没有返回有效播放地址，请尝试其他来源。" />}
+  return <div className="player-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="player-sheet"><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title}</h2></div><div><small className="player-status">{qualityLabel}</small><button className={isFavorite ? 'icon-button active' : 'icon-button'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" aria-label="关闭播放器" title="关闭播放器" onClick={onClose}><X size={20} /></button></div></header>
+    {current ? <><div className={item.category === 'short' || item.category === 'ai-short' ? 'player-stage vertical-mode' : 'player-stage'} ref={container} />{resumedAt > 0 && <div className="resume-notice"><Clock3 size={14} />已从 {formatTime(resumedAt)} 继续播放</div>}<div className="player-controls"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div></> : <EmptyState icon={Film} title="暂无可播放线路" text="当前来源没有返回有效播放地址，请尝试其他来源。" />}
   </section></div>;
 }
 

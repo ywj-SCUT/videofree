@@ -19,9 +19,12 @@ export interface LiveChannel {
 }
 export interface ImportResult { importedSources: number; importedLives: number; failures: string[]; settings: AppSettings }
 export interface SearchResponse { items: MediaItem[]; failures: Array<{ sourceId: string; sourceName: string; message: string }>; elapsedMs: number }
+export interface HistoryItem extends MediaItem {
+  lineName?: string; episodeName?: string; progress: number; duration: number; watchedAt: number;
+}
 export interface LibraryState {
   favorites: MediaItem[];
-  history: Array<MediaItem & { episodeName?: string; progress: number; duration: number; watchedAt: number }>;
+  history: HistoryItem[];
 }
 export interface AppSettings {
   sources: CmsSource[]; liveChannels: LiveChannel[];

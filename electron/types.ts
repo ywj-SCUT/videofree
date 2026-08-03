@@ -72,9 +72,17 @@ export interface SearchResponse {
   elapsedMs: number;
 }
 
+export interface HistoryItem extends MediaItem {
+  lineName?: string;
+  episodeName?: string;
+  progress: number;
+  duration: number;
+  watchedAt: number;
+}
+
 export interface LibraryState {
   favorites: MediaItem[];
-  history: Array<MediaItem & { episodeName?: string; progress: number; duration: number; watchedAt: number }>;
+  history: HistoryItem[];
 }
 
 export interface AppSettings {
