@@ -14,6 +14,7 @@ const defaults: PersistedData = {
     sources: DEFAULT_SOURCES,
     liveChannels: [],
     danmakuProviders: [{ id: 'bilibili', name: 'Bilibili 弹幕', type: 'bilibili', enabled: true }],
+    adFiltering: true,
     qualityPreference: 'highest',
   },
   library: { favorites: [], history: [] },

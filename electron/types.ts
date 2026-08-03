@@ -120,6 +120,7 @@ export interface AppSettings {
   sources: CmsSource[];
   liveChannels: LiveChannel[];
   danmakuProviders: DanmakuProvider[];
+  adFiltering: boolean;
   qualityPreference: 'auto' | 'highest' | '1080p' | '720p';
   proxyPort: number;
   proxyBaseUrl?: string;

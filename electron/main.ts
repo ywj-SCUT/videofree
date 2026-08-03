@@ -142,6 +142,10 @@ function registerIpc(): void {
     await storage.updateSettings({ danmakuProviders });
     return storage.getSettings(proxy?.port ?? 0);
   });
+  ipcMain.handle('settings:ad-filtering', async (_event, adFiltering: boolean) => {
+    await storage.updateSettings({ adFiltering });
+    return storage.getSettings(proxy?.port ?? 0);
+  });
   ipcMain.handle('settings:import-tvbox', (_event, config: unknown) => applyTvBoxImport(config));
   ipcMain.handle('settings:import-content', (_event, content: string, name: string) => applyImportedContent(content, name));
   ipcMain.handle('settings:import-url', async (_event, url: string) => {

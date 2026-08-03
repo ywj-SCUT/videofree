@@ -15,6 +15,7 @@ const defaultSettings: AppSettings = {
   sources: defaultSources,
   liveChannels: [],
   danmakuProviders: [{ id: 'bilibili', name: 'Bilibili 弹幕', type: 'bilibili', enabled: true }],
+  adFiltering: true,
   qualityPreference: 'highest',
   proxyPort: 0,
   proxyBaseUrl: '/api/proxy',
@@ -96,6 +97,7 @@ export function installWebApi(): void {
       return mergeImported(settings(), await request('/api/iptv', {}));
     },
     async saveDanmakuProviders(danmakuProviders: DanmakuProvider[]) { return saveSettings({ ...settings(), danmakuProviders }); },
+    async saveAdFiltering(adFiltering: boolean) { return saveSettings({ ...settings(), adFiltering }); },
     danmaku(title: string, episodeName: string) {
       return request('/api/danmaku', { title, episodeName, providers: settings().danmakuProviders });
     },

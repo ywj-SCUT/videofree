@@ -1,4 +1,5 @@
 import { fetch as undiciFetch, ProxyAgent } from 'undici';
+import { filterHlsManifest } from '../../../../electron/hls-filter';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,19 +10,20 @@ const defaultHeaders = {
   Accept: '*/*',
 };
 
-function proxyUrl(target: string, referer: string): string {
+function proxyUrl(target: string, referer: string, filterAds = false): string {
   const search = new URLSearchParams({ url: target, referer });
+  if (filterAds) search.set('filterAds', '1');
   return `/api/proxy?${search.toString()}`;
 }
 
-function rewriteManifest(manifest: string, manifestUrl: string, referer: string): string {
+function rewriteManifest(manifest: string, manifestUrl: string, referer: string, filterAds = false): string {
   return manifest.split(/\r?\n/).map((line) => {
     const trimmed = line.trim();
     if (!trimmed) return line;
     if (trimmed.startsWith('#')) {
-      return line.replace(/URI="([^"]+)"/g, (_match, uri: string) => `URI="${proxyUrl(new URL(uri, manifestUrl).toString(), referer)}"`);
+      return line.replace(/URI="([^"]+)"/g, (_match, uri: string) => `URI="${proxyUrl(new URL(uri, manifestUrl).toString(), referer, filterAds)}"`);
     }
-    return proxyUrl(new URL(trimmed, manifestUrl).toString(), referer);
+    return proxyUrl(new URL(trimmed, manifestUrl).toString(), referer, filterAds);
   }).join('\n');
 }
 
@@ -46,6 +48,7 @@ export async function GET(request: Request) {
   if (!/^https?:\/\//i.test(target)) return new Response('Invalid target', { status: 400 });
   try {
     const referer = incoming.searchParams.get('referer') ?? target;
+    const filterAds = incoming.searchParams.get('filterAds') === '1';
     const headers: Record<string, string> = { ...defaultHeaders, Referer: referer };
     const range = request.headers.get('range');
     if (range) headers.Range = range;
@@ -55,8 +58,15 @@ export async function GET(request: Request) {
     const manifest = /mpegurl|m3u8/i.test(contentType) || new URL(target).pathname.toLowerCase().endsWith('.m3u8');
     if (manifest) {
       const effectiveUrl = upstream.url || target;
-      return new Response(rewriteManifest(await upstream.text(), effectiveUrl, effectiveUrl), {
-        headers: { 'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8', 'Cache-Control': 'no-cache' },
+      const original = await upstream.text();
+      const filtered = filterAds ? filterHlsManifest(original) : { manifest: original, removedSegments: 0, removedDuration: 0, removedMarkers: 0 };
+      return new Response(rewriteManifest(filtered.manifest, effectiveUrl, effectiveUrl, filterAds), {
+        headers: {
+          'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8', 'Cache-Control': 'no-cache',
+          'X-VideoGET-Ad-Segments': String(filtered.removedSegments),
+          'X-VideoGET-Ad-Seconds': filtered.removedDuration.toFixed(3),
+          'X-VideoGET-Ad-Markers': String(filtered.removedMarkers),
+        },
       });
     }
     const responseHeaders = new Headers();

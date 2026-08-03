@@ -29,7 +29,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof Compass }> = [
   { id: 'history', label: '观看记录', icon: Clock3 },
 ];
 
-const emptySettings: AppSettings = { sources: [], liveChannels: [], danmakuProviders: [], qualityPreference: 'highest', proxyPort: 0 };
+const emptySettings: AppSettings = { sources: [], liveChannels: [], danmakuProviders: [], adFiltering: true, qualityPreference: 'highest', proxyPort: 0 };
 const emptyLibrary: LibraryState = { favorites: [], history: [] };
 
 type QualityPreference = AppSettings['qualityPreference'];
@@ -100,8 +100,9 @@ function imageUrl(source: string, proxyPort: number, width: number, height: numb
 
 function streamUrl(settings: AppSettings, source: string): string {
   if (!/^https?:\/\//i.test(source)) return source;
-  if (settings.proxyBaseUrl) return `${settings.proxyBaseUrl}?url=${encodeURIComponent(source)}`;
-  return settings.proxyPort > 0 ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(source)}` : source;
+  const adFilter = settings.adFiltering ? '&filterAds=1' : '';
+  if (settings.proxyBaseUrl) return `${settings.proxyBaseUrl}?url=${encodeURIComponent(source)}${adFilter}`;
+  return settings.proxyPort > 0 ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(source)}${adFilter}` : source;
 }
 
 function App() {
@@ -403,7 +404,7 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
         {settings.sources.map((source) => <div className="source-row" key={source.id}><button className={source.enabled ? 'toggle on' : 'toggle'} onClick={() => void saveSources(settings.sources.map((entry) => entry.id === source.id ? { ...entry, enabled: !entry.enabled } : entry))}><span /></button><div><strong>{source.name}</strong><small>{source.type === 'cms' ? source.api : 'Spider 规则'}</small>{testResult[source.id] && <em>{testResult[source.id]}</em>}</div><button className="text-button" onClick={() => void test(source)} disabled={testing === source.id}>{testing === source.id ? '检测中' : '检测'}</button><button className="icon-button danger" onClick={() => void saveSources(settings.sources.filter((entry) => entry.id !== source.id))}><Trash2 size={16} /></button></div>)}
       </div>
     </section>
-    <section className="settings-section"><div className="settings-heading"><div><h2>播放质量</h2><p>优先选择源提供的最高分辨率；实际画质由视频源决定。</p></div></div><div className="quality-options">{(['highest', 'auto', '1080p', '720p'] as const).map((quality) => <button key={quality} className={settings.qualityPreference === quality ? 'selected' : ''} onClick={() => void window.lumen.saveQuality(quality).then(onSettings)}><span>{quality === 'highest' ? '最高画质' : quality === 'auto' ? '智能适配' : quality.toUpperCase()}</span>{settings.qualityPreference === quality && <Check size={16} />}</button>)}</div></section>
+    <section className="settings-section"><div className="settings-heading"><div><h2>播放质量</h2><p>优先选择源提供的最高分辨率；实际画质由视频源决定。</p></div></div><div className="quality-options">{(['highest', 'auto', '1080p', '720p'] as const).map((quality) => <button key={quality} className={settings.qualityPreference === quality ? 'selected' : ''} onClick={() => void window.lumen.saveQuality(quality).then(onSettings)}><span>{quality === 'highest' ? '最高画质' : quality === 'auto' ? '智能适配' : quality.toUpperCase()}</span>{settings.qualityPreference === quality && <Check size={16} />}</button>)}</div><div className="source-list playback-options"><div className="source-row"><button className={settings.adFiltering ? 'toggle on' : 'toggle'} onClick={() => void window.lumen.saveAdFiltering(!settings.adFiltering).then(onSettings)}><span /></button><div><strong>HLS 广告片段过滤</strong><small>识别 CUE、SCTE-35、Interstitial 与广告分片路径</small></div><span className="source-state">{settings.adFiltering ? '已开启' : '已关闭'}</span></div></div></section>
     <section className="settings-section"><div className="settings-heading"><div><h2>弹幕来源</h2><p>播放器会按片名和集数匹配、合并并去重所有启用来源。</p></div></div>
       <div className="add-source"><input value={danmakuName} onChange={(event) => setDanmakuName(event.target.value)} placeholder="来源名称" /><input value={danmakuApi} onChange={(event) => setDanmakuApi(event.target.value)} placeholder="DandanPlay / LogVar 兼容 API 地址" /><button className="primary-button" onClick={addDanmakuProvider}><Plus size={16} />添加</button></div>
       <div className="source-list">{settings.danmakuProviders.map((provider) => <div className={provider.type === 'bilibili' ? 'source-row builtin' : 'source-row'} key={provider.id}><button className={provider.enabled ? 'toggle on' : 'toggle'} onClick={() => void saveDanmakuProviders(settings.danmakuProviders.map((entry) => entry.id === provider.id ? { ...entry, enabled: !entry.enabled } : entry))}><span /></button><div><strong>{provider.name}</strong><small>{provider.type === 'bilibili' ? '内置番剧匹配与弹幕 XML' : provider.api}</small></div>{provider.type !== 'bilibili' && <button className="icon-button danger" aria-label="删除弹幕来源" title="删除弹幕来源" onClick={() => void saveDanmakuProviders(settings.danmakuProviders.filter((entry) => entry.id !== provider.id))}><Trash2 size={16} /></button>}</div>)}</div>

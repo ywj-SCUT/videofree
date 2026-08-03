@@ -177,6 +177,7 @@ kbd { border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; backg
 .source-row.builtin { padding-left: 15px; }
 .source-logo { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 7px; background: rgba(33,196,162,.09); color: var(--accent-2); }
 .source-row em { font-style: normal; color: var(--accent-2); font-size: 10px; }
+.playback-options { margin-top: 14px; }
 .source-state { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
 .text-button { background: transparent; color: #b8b8be; font-size: 11px; padding: 8px; }
 .text-button:hover { color: #fff; }

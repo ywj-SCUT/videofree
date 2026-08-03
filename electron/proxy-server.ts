@@ -5,19 +5,21 @@ import { URL } from 'node:url';
 import path from 'node:path';
 import sharp from 'sharp';
 import { fetch as undiciFetch, ProxyAgent } from 'undici';
+import { filterHlsManifest } from './hls-filter.js';
 
 const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
   Accept: '*/*',
 };
 
-function proxiedUrl(port: number, target: string, referer?: string): string {
+function proxiedUrl(port: number, target: string, referer?: string, filterAds = false): string {
   const params = new URLSearchParams({ url: target });
   if (referer) params.set('referer', referer);
+  if (filterAds) params.set('filterAds', '1');
   return `http://127.0.0.1:${port}/stream?${params}`;
 }
 
-function rewriteManifest(manifest: string, manifestUrl: string, port: number, referer?: string): string {
+function rewriteManifest(manifest: string, manifestUrl: string, port: number, referer?: string, filterAds = false): string {
   const base = new URL(manifestUrl);
   return manifest.split(/\r?\n/).map((line) => {
     const trimmed = line.trim();
@@ -25,11 +27,11 @@ function rewriteManifest(manifest: string, manifestUrl: string, port: number, re
     if (trimmed.startsWith('#')) {
       return line.replace(/URI="([^"]+)"/g, (_match, uri: string) => {
         const absolute = new URL(uri, base).toString();
-        return `URI="${proxiedUrl(port, absolute, referer ?? manifestUrl)}"`;
+        return `URI="${proxiedUrl(port, absolute, referer ?? manifestUrl, filterAds)}"`;
       });
     }
     try {
-      return proxiedUrl(port, new URL(trimmed, base).toString(), referer ?? manifestUrl);
+      return proxiedUrl(port, new URL(trimmed, base).toString(), referer ?? manifestUrl, filterAds);
     } catch {
       return line;
     }
@@ -174,6 +176,7 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
     try {
       const headers: Record<string, string> = { ...defaultHeaders };
       const referer = incoming.searchParams.get('referer');
+      const filterAds = incoming.searchParams.get('filterAds') === '1';
       if (referer) headers.Referer = referer;
       if (request.headers.range) headers.Range = request.headers.range;
       const upstream = await fetchStream(target, headers, streamOutboundProxy);
@@ -185,11 +188,15 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
       const isManifest = /mpegurl|m3u8/i.test(contentType) || new URL(target).pathname.toLowerCase().endsWith('.m3u8');
       if (isManifest) {
         const manifest = await upstream.text();
+        const filtered = filterAds ? filterHlsManifest(manifest) : { manifest, removedSegments: 0, removedDuration: 0, removedMarkers: 0 };
         response.writeHead(200, {
           'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8',
           'Cache-Control': 'no-cache',
+          'X-VideoGET-Ad-Segments': String(filtered.removedSegments),
+          'X-VideoGET-Ad-Seconds': filtered.removedDuration.toFixed(3),
+          'X-VideoGET-Ad-Markers': String(filtered.removedMarkers),
         });
-        response.end(rewriteManifest(manifest, upstream.url || target, port, referer ?? target));
+        response.end(rewriteManifest(filtered.manifest, upstream.url || target, port, referer ?? target, filterAds));
         return;
       }
       const forwarded = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control'];

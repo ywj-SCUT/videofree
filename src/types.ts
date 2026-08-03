@@ -36,7 +36,7 @@ export interface LibraryState {
   history: HistoryItem[];
 }
 export interface AppSettings {
-  sources: CmsSource[]; liveChannels: LiveChannel[]; danmakuProviders: DanmakuProvider[];
+  sources: CmsSource[]; liveChannels: LiveChannel[]; danmakuProviders: DanmakuProvider[]; adFiltering: boolean;
   qualityPreference: 'auto' | 'highest' | '1080p' | '720p'; proxyPort: number; proxyBaseUrl?: string;
 }
 export interface LumenApi {
@@ -51,6 +51,7 @@ export interface LumenApi {
   importUrl(url: string): Promise<ImportResult>;
   importIptvCatalog(): Promise<ImportResult>;
   saveDanmakuProviders(providers: DanmakuProvider[]): Promise<AppSettings>;
+  saveAdFiltering(enabled: boolean): Promise<AppSettings>;
   danmaku(title: string, episodeName: string): Promise<DanmakuResponse>;
   testSource(source: CmsSource): Promise<{ ok: boolean; latencyMs: number; message: string }>;
   getLibrary(): Promise<LibraryState>;
