@@ -1,7 +1,7 @@
 'use client';
 
 import type {
-  AppSettings, CmsSource, ImportResult, LibraryState, LumenApi, LiveChannel,
+  AppSettings, CmsSource, DanmakuProvider, ImportResult, LibraryState, LumenApi, LiveChannel,
   MediaCategory, MediaItem, SearchResponse,
 } from '../../src/types';
 
@@ -14,6 +14,7 @@ const defaultSources: CmsSource[] = [
 const defaultSettings: AppSettings = {
   sources: defaultSources,
   liveChannels: [],
+  danmakuProviders: [{ id: 'bilibili', name: 'Bilibili 弹幕', type: 'bilibili', enabled: true }],
   qualityPreference: 'highest',
   proxyPort: 0,
   proxyBaseUrl: '/api/proxy',
@@ -93,6 +94,10 @@ export function installWebApi(): void {
     },
     async importIptvCatalog() {
       return mergeImported(settings(), await request('/api/iptv', {}));
+    },
+    async saveDanmakuProviders(danmakuProviders: DanmakuProvider[]) { return saveSettings({ ...settings(), danmakuProviders }); },
+    danmaku(title: string, episodeName: string) {
+      return request('/api/danmaku', { title, episodeName, providers: settings().danmakuProviders });
     },
     testSource(source: CmsSource) {
       return request('/api/source-test', { source });

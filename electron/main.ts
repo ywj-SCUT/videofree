@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { aggregateSearch, getDetail, importTvBox, resolveMedia, testSource } from './source-engine.js';
 import { mergeLiveChannels, parseLivePlaylist } from './live-engine.js';
 import { fetchIptvCatalog } from './iptv-catalog.js';
+import { aggregateDanmaku } from './danmaku-engine.js';
 import { fetchRemoteText } from './net-client.js';
 import { startProxyServer } from './proxy-server.js';
 import { Storage } from './storage.js';
@@ -137,6 +138,10 @@ function registerIpc(): void {
     await storage.updateSettings({ qualityPreference: quality });
     return storage.getSettings(proxy?.port ?? 0);
   });
+  ipcMain.handle('settings:danmaku-providers', async (_event, danmakuProviders) => {
+    await storage.updateSettings({ danmakuProviders });
+    return storage.getSettings(proxy?.port ?? 0);
+  });
   ipcMain.handle('settings:import-tvbox', (_event, config: unknown) => applyTvBoxImport(config));
   ipcMain.handle('settings:import-content', (_event, content: string, name: string) => applyImportedContent(content, name));
   ipcMain.handle('settings:import-url', async (_event, url: string) => {
@@ -158,6 +163,10 @@ function registerIpc(): void {
   ipcMain.handle('media:resolve', async (_event, item) => {
     const settings = storage.getSettings(proxy?.port ?? 0);
     return resolveMedia(settings.sources, item);
+  });
+  ipcMain.handle('media:danmaku', async (_event, title: string, episodeName: string) => {
+    const settings = storage.getSettings(proxy?.port ?? 0);
+    return aggregateDanmaku(settings.danmakuProviders, title, episodeName);
   });
   ipcMain.handle('library:get', () => storage.getLibrary());
   ipcMain.handle('library:save', async (_event, library: LibraryState) => {

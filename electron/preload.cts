@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppSettings, CmsSource, LibraryState, MediaCategory } from './types.js';
+import type { AppSettings, CmsSource, DanmakuProvider, LibraryState, MediaCategory } from './types.js';
 
 const api = {
   search: (query: string, category: MediaCategory) => ipcRenderer.invoke('media:search', query, category),
@@ -12,6 +12,8 @@ const api = {
   importContent: (content: string, name: string) => ipcRenderer.invoke('settings:import-content', content, name),
   importUrl: (url: string) => ipcRenderer.invoke('settings:import-url', url),
   importIptvCatalog: () => ipcRenderer.invoke('settings:import-iptv'),
+  saveDanmakuProviders: (providers: DanmakuProvider[]) => ipcRenderer.invoke('settings:danmaku-providers', providers),
+  danmaku: (title: string, episodeName: string) => ipcRenderer.invoke('media:danmaku', title, episodeName),
   testSource: (source: CmsSource) => ipcRenderer.invoke('settings:test-source', source),
   getLibrary: (): Promise<LibraryState> => ipcRenderer.invoke('library:get'),
   saveLibrary: (library: LibraryState) => ipcRenderer.invoke('library:save', library),

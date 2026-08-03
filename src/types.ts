@@ -17,6 +17,15 @@ export interface LiveChannel {
   id: string; sourceId: string; sourceName: string; name: string; group: string;
   url: string; urls?: string[]; logo?: string; tvgId?: string;
 }
+export interface DanmakuProvider {
+  id: string; name: string; type: 'bilibili' | 'dandanplay'; api?: string; enabled: boolean;
+}
+export interface DanmakuComment { text: string; time: number; mode: 0 | 1 | 2; color: string; source: string }
+export interface DanmakuMatch { providerId: string; providerName: string; title: string; episode: string; count: number }
+export interface DanmakuResponse {
+  comments: DanmakuComment[]; matches: DanmakuMatch[];
+  failures: Array<{ providerId: string; providerName: string; message: string }>; elapsedMs: number;
+}
 export interface ImportResult { importedSources: number; importedLives: number; failures: string[]; settings: AppSettings }
 export interface SearchResponse { items: MediaItem[]; failures: Array<{ sourceId: string; sourceName: string; message: string }>; elapsedMs: number }
 export interface HistoryItem extends MediaItem {
@@ -27,7 +36,7 @@ export interface LibraryState {
   history: HistoryItem[];
 }
 export interface AppSettings {
-  sources: CmsSource[]; liveChannels: LiveChannel[];
+  sources: CmsSource[]; liveChannels: LiveChannel[]; danmakuProviders: DanmakuProvider[];
   qualityPreference: 'auto' | 'highest' | '1080p' | '720p'; proxyPort: number; proxyBaseUrl?: string;
 }
 export interface LumenApi {
@@ -41,6 +50,8 @@ export interface LumenApi {
   importContent(content: string, name: string): Promise<ImportResult>;
   importUrl(url: string): Promise<ImportResult>;
   importIptvCatalog(): Promise<ImportResult>;
+  saveDanmakuProviders(providers: DanmakuProvider[]): Promise<AppSettings>;
+  danmaku(title: string, episodeName: string): Promise<DanmakuResponse>;
   testSource(source: CmsSource): Promise<{ ok: boolean; latencyMs: number; message: string }>;
   getLibrary(): Promise<LibraryState>;
   saveLibrary(library: LibraryState): Promise<LibraryState>;

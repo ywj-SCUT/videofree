@@ -59,6 +59,37 @@ export interface LiveChannel {
   tvgId?: string;
 }
 
+export interface DanmakuProvider {
+  id: string;
+  name: string;
+  type: 'bilibili' | 'dandanplay';
+  api?: string;
+  enabled: boolean;
+}
+
+export interface DanmakuComment {
+  text: string;
+  time: number;
+  mode: 0 | 1 | 2;
+  color: string;
+  source: string;
+}
+
+export interface DanmakuMatch {
+  providerId: string;
+  providerName: string;
+  title: string;
+  episode: string;
+  count: number;
+}
+
+export interface DanmakuResponse {
+  comments: DanmakuComment[];
+  matches: DanmakuMatch[];
+  failures: Array<{ providerId: string; providerName: string; message: string }>;
+  elapsedMs: number;
+}
+
 export interface ImportResult {
   importedSources: number;
   importedLives: number;
@@ -88,6 +119,7 @@ export interface LibraryState {
 export interface AppSettings {
   sources: CmsSource[];
   liveChannels: LiveChannel[];
+  danmakuProviders: DanmakuProvider[];
   qualityPreference: 'auto' | 'highest' | '1080p' | '720p';
   proxyPort: number;
   proxyBaseUrl?: string;

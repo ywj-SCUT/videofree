@@ -14,6 +14,7 @@
     "smoke:tvbox": "npm run build && node scripts/tvbox-smoke.mjs",
     "smoke:web": "npm run web:build && node scripts/web-smoke.mjs",
     "smoke:iptv": "npm run build && node scripts/iptv-smoke.mjs",
+    "smoke:danmaku": "npm run build && node scripts/danmaku-smoke.mjs",
     "smoke:phase1": "npm run build && node scripts/tvbox-smoke.mjs && node scripts/aggregation-smoke.mjs && node scripts/source-smoke.mjs && npm run web:build && node scripts/web-smoke.mjs",
     "web:dev": "next dev web --hostname 127.0.0.1",
     "web:build": "next build web",
@@ -23,6 +24,8 @@
   },
   "dependencies": {
     "artplayer": "^5.3.0",
+    "artplayer-plugin-danmuku": "^5.3.0",
+    "fast-xml-parser": "^5.2.5",
     "hls.js": "^1.6.10",
     "lucide-react": "^0.468.0",
     "next": "^14.2.35",

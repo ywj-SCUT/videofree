@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
+import artplayerPluginDanmuku, { type Result as DanmakuPlugin } from 'artplayer-plugin-danmuku';
 import Hls from 'hls.js';
 import {
-  Check, ChevronDown, Clock3, Compass, Film, Heart, LoaderCircle,
+  Captions, CaptionsOff, Check, ChevronDown, Clock3, Compass, Film, Heart, LoaderCircle,
   Maximize2, Minimize2, Minus, MonitorPlay, Play, Plus, Radio, Search,
   RefreshCw, Settings, Sparkles, Star, Trash2, Tv, Upload, X,
 } from 'lucide-react';
-import type { AppSettings, CmsSource, HistoryItem, LibraryState, LiveChannel, MediaCategory, MediaItem } from './types';
+import type { AppSettings, CmsSource, DanmakuProvider, HistoryItem, LibraryState, LiveChannel, MediaCategory, MediaItem } from './types';
 
 type View = 'discover' | 'search' | 'shorts' | 'live' | 'favorites' | 'history' | 'settings';
 
@@ -28,7 +29,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof Compass }> = [
   { id: 'history', label: '观看记录', icon: Clock3 },
 ];
 
-const emptySettings: AppSettings = { sources: [], liveChannels: [], qualityPreference: 'highest', proxyPort: 0 };
+const emptySettings: AppSettings = { sources: [], liveChannels: [], danmakuProviders: [], qualityPreference: 'highest', proxyPort: 0 };
 const emptyLibrary: LibraryState = { favorites: [], history: [] };
 
 type QualityPreference = AppSettings['qualityPreference'];
@@ -328,13 +329,23 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
   const [testResult, setTestResult] = useState<Record<string, string>>({});
   const [importUrl, setImportUrl] = useState('');
   const [importing, setImporting] = useState(false);
+  const [danmakuName, setDanmakuName] = useState('');
+  const [danmakuApi, setDanmakuApi] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const saveSources = async (sources: CmsSource[]) => onSettings(await window.lumen.saveSources(sources));
+  const saveDanmakuProviders = async (providers: DanmakuProvider[]) => onSettings(await window.lumen.saveDanmakuProviders(providers));
   const addSource = () => {
     if (!name.trim() || !/^https?:\/\//i.test(api)) return;
     void saveSources([...settings.sources, { id: `cms-${Date.now()}`, name: name.trim(), type: 'cms', api: api.trim(), enabled: true, searchable: true }]);
     setName(''); setApi('');
+  };
+  const addDanmakuProvider = () => {
+    if (!danmakuName.trim() || !/^https?:\/\//i.test(danmakuApi.trim())) return;
+    void saveDanmakuProviders([...settings.danmakuProviders, {
+      id: `danmaku-${Date.now()}`, name: danmakuName.trim(), type: 'dandanplay', api: danmakuApi.trim(), enabled: true,
+    }]);
+    setDanmakuName(''); setDanmakuApi('');
   };
   const importFile = async (file?: File) => {
     if (!file) return;
@@ -393,6 +404,10 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
       </div>
     </section>
     <section className="settings-section"><div className="settings-heading"><div><h2>播放质量</h2><p>优先选择源提供的最高分辨率；实际画质由视频源决定。</p></div></div><div className="quality-options">{(['highest', 'auto', '1080p', '720p'] as const).map((quality) => <button key={quality} className={settings.qualityPreference === quality ? 'selected' : ''} onClick={() => void window.lumen.saveQuality(quality).then(onSettings)}><span>{quality === 'highest' ? '最高画质' : quality === 'auto' ? '智能适配' : quality.toUpperCase()}</span>{settings.qualityPreference === quality && <Check size={16} />}</button>)}</div></section>
+    <section className="settings-section"><div className="settings-heading"><div><h2>弹幕来源</h2><p>播放器会按片名和集数匹配、合并并去重所有启用来源。</p></div></div>
+      <div className="add-source"><input value={danmakuName} onChange={(event) => setDanmakuName(event.target.value)} placeholder="来源名称" /><input value={danmakuApi} onChange={(event) => setDanmakuApi(event.target.value)} placeholder="DandanPlay / LogVar 兼容 API 地址" /><button className="primary-button" onClick={addDanmakuProvider}><Plus size={16} />添加</button></div>
+      <div className="source-list">{settings.danmakuProviders.map((provider) => <div className={provider.type === 'bilibili' ? 'source-row builtin' : 'source-row'} key={provider.id}><button className={provider.enabled ? 'toggle on' : 'toggle'} onClick={() => void saveDanmakuProviders(settings.danmakuProviders.map((entry) => entry.id === provider.id ? { ...entry, enabled: !entry.enabled } : entry))}><span /></button><div><strong>{provider.name}</strong><small>{provider.type === 'bilibili' ? '内置番剧匹配与弹幕 XML' : provider.api}</small></div>{provider.type !== 'bilibili' && <button className="icon-button danger" aria-label="删除弹幕来源" title="删除弹幕来源" onClick={() => void saveDanmakuProviders(settings.danmakuProviders.filter((entry) => entry.id !== provider.id))}><Trash2 size={16} /></button>}</div>)}</div>
+    </section>
     <section className="settings-section about"><div className="settings-heading"><div><h2>关于 VideoGET</h2><p>本地优先的桌面聚合播放器 · 版本 0.1.0</p></div></div><div className="about-grid"><span><MonitorPlay size={18} />Electron 桌面端</span><span><Star size={18} />ArtPlayer + HLS.js</span><span><Check size={18} />数据保存在本机</span></div></section>
   </div>;
 }
@@ -421,15 +436,20 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Artplayer | null>(null);
   const [qualityLabel, setQualityLabel] = useState('检测画质');
+  const [danmakuLabel, setDanmakuLabel] = useState('正在匹配弹幕');
+  const [danmakuVisible, setDanmakuVisible] = useState(true);
   const [resumedAt, setResumedAt] = useState(0);
   const current = lines[lineIndex]?.episodes[episodeIndex];
 
   useEffect(() => {
     if (!container.current || !current) return;
     setQualityLabel('检测画质');
+    setDanmakuLabel('正在匹配弹幕');
+    setDanmakuVisible(true);
     setResumedAt(0);
     const originalUrl = current.url;
     const url = streamUrl(settings, originalUrl);
+    let active = true;
     const instance = new Artplayer({
       container: container.current,
       url,
@@ -445,6 +465,28 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
       hotkey: true,
       theme: '#ffffff',
       lang: 'zh-cn',
+      plugins: [artplayerPluginDanmuku({
+        danmuku: async () => {
+          try {
+            const response = await window.lumen.danmaku(item.title, current.name);
+            if (active) setDanmakuLabel(response.comments.length
+              ? `${response.comments.length} 条弹幕 · ${response.matches.length} 个源`
+              : response.failures.length ? '弹幕源暂不可用' : '本集暂无弹幕');
+            return response.comments.map(({ text, time, mode, color }) => ({ text, time, mode, color }));
+          } catch {
+            if (active) setDanmakuLabel('弹幕加载失败');
+            return [];
+          }
+        },
+        speed: 5,
+        opacity: 0.78,
+        fontSize: 24,
+        margin: [10, '25%'],
+        antiOverlap: true,
+        synchronousPlayback: true,
+        heatmap: true,
+        emitter: false,
+      })],
       type: /m3u8(?:$|\?)/i.test(originalUrl) ? 'm3u8' : undefined,
       customType: {
         m3u8: (video, sourceUrl, art) => {
@@ -479,10 +521,17 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
       if (!/m3u8(?:$|\?)/i.test(originalUrl) && instance.video.videoHeight > 0) setQualityLabel(`${instance.video.videoHeight}P`);
     });
     player.current = instance;
-    return () => { saveProgress(); instance.destroy(false); player.current = null; };
+    return () => { active = false; saveProgress(); instance.destroy(false); player.current = null; };
   }, [current?.url, lineIndex, episodeIndex, settings.proxyPort, settings.qualityPreference, onProgress]);
 
-  return <div className="player-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="player-sheet"><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title}</h2></div><div><small className="player-status">{qualityLabel}</small><button className={isFavorite ? 'icon-button active' : 'icon-button'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" aria-label="关闭播放器" title="关闭播放器" onClick={onClose}><X size={20} /></button></div></header>
+  const toggleDanmaku = () => {
+    const plugin = player.current?.plugins.artplayerPluginDanmuku as DanmakuPlugin | undefined;
+    if (!plugin) return;
+    if (danmakuVisible) plugin.hide(); else plugin.show();
+    setDanmakuVisible(!danmakuVisible);
+  };
+
+  return <div className="player-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="player-sheet"><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title}</h2></div><div><small className="player-status">{qualityLabel}</small><small className="player-status danmaku-status">{danmakuLabel}</small><button className={danmakuVisible ? 'icon-button active' : 'icon-button'} aria-label={danmakuVisible ? '关闭弹幕' : '开启弹幕'} title={danmakuVisible ? '关闭弹幕' : '开启弹幕'} onClick={toggleDanmaku}>{danmakuVisible ? <Captions size={18} /> : <CaptionsOff size={18} />}</button><button className={isFavorite ? 'icon-button active' : 'icon-button'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" aria-label="关闭播放器" title="关闭播放器" onClick={onClose}><X size={20} /></button></div></header>
     {current ? <><div className={item.category === 'short' || item.category === 'ai-short' ? 'player-stage vertical-mode' : 'player-stage'} ref={container} />{resumedAt > 0 && <div className="resume-notice"><Clock3 size={14} />已从 {formatTime(resumedAt)} 继续播放</div>}<div className="player-controls"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div></> : <EmptyState icon={Film} title="暂无可播放线路" text="当前来源没有返回有效播放地址，请尝试其他来源。" />}
   </section></div>;
 }

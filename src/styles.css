@@ -199,6 +199,7 @@ kbd { border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; backg
 .player-header h2 { margin: 4px 0 0; font-size: 15px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .player-header > div:last-child { display: flex; gap: 7px; }
 .player-status { align-self: center; color: var(--muted); font-size: 10px; font-weight: 500; }
+.danmaku-status { max-width: 170px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .player-stage { width: 100%; aspect-ratio: 16 / 9; background: #000; }
 .player-stage.vertical-mode { max-height: 67vh; aspect-ratio: 16 / 9; }
 .resume-notice { min-height: 34px; padding: 0 20px; display: flex; align-items: center; gap: 7px; color: #d4d4d9; background: rgba(33,196,162,.08); border-top: 1px solid rgba(33,196,162,.14); border-bottom: 1px solid rgba(33,196,162,.14); font-size: 11px; }
