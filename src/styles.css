@@ -121,8 +121,10 @@ kbd { border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; backg
 .empty-state p { margin: 0 0 18px; font-size: 12px; max-width: 340px; line-height: 1.7; }
 .live-list, .library-list { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .live-row, .library-row { min-height: 64px; display: flex; align-items: center; gap: 13px; background: #121215; padding: 10px 14px; }
+.live-row { width: 100%; text-align: left; color: inherit; }
 .live-row:hover, .library-row:hover { background: #17171b; }
 .live-icon { width: 36px; height: 36px; border-radius: 7px; display: grid; place-items: center; background: rgba(255,77,104,.1); color: var(--accent); }
+.live-icon img { width: 100%; height: 100%; border-radius: 7px; object-fit: cover; }
 .live-row div, .source-row > div { display: grid; gap: 3px; min-width: 0; flex: 1; }
 .live-row strong, .library-row strong, .source-row strong { font-size: 13px; }
 .live-row small, .source-row small { color: var(--muted); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -135,6 +137,13 @@ kbd { border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; backg
 .library-info span { font-size: 11px; color: var(--muted); }
 .library-info i { position: absolute; left: 0; bottom: 3px; height: 2px; max-width: 100%; background: var(--accent); border-radius: 2px; }
 .source-pill { font-size: 10px; color: var(--muted); padding: 4px 7px; border-radius: 4px; background: #202025; }
+.live-search { width: min(380px, 48%); height: 40px; display: flex; align-items: center; gap: 9px; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; background: #151519; color: var(--muted); }
+.live-search:focus-within { border-color: rgba(244,189,80,.5); }
+.live-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 12px; }
+.live-search button { display: grid; place-items: center; padding: 2px; background: transparent; color: var(--muted); }
+.live-toolbar { min-height: 42px; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 12px; }
+.live-toolbar > span { flex: none; padding-top: 8px; color: var(--muted); font-size: 11px; }
+.live-groups { flex: 1; margin-bottom: 0; padding-bottom: 4px; overflow-x: auto; }
 
 .settings-page { max-width: 1200px; }
 .settings-section { padding: 26px 0 30px; border-top: 1px solid var(--line); }
@@ -145,6 +154,10 @@ kbd { border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; backg
 .add-source { display: grid; grid-template-columns: minmax(150px, .4fr) 1fr auto; gap: 8px; margin-bottom: 14px; }
 .add-source input { min-width: 0; height: 39px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: #151519; outline: 0; font-size: 12px; }
 .add-source input:focus { border-color: rgba(244,189,80,.5); }
+.import-url { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 10px; }
+.import-url input { min-width: 0; height: 39px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: #151519; outline: 0; font-size: 12px; }
+.import-url input:focus { border-color: rgba(244,189,80,.5); }
+.primary-button:disabled, .secondary-button:disabled { opacity: .45; cursor: default; }
 .source-list { display: grid; gap: 1px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--line); }
 .source-row { min-height: 62px; display: flex; align-items: center; gap: 12px; padding: 10px 13px; background: #121215; }
 .source-row.builtin { padding-left: 15px; }
@@ -171,6 +184,7 @@ kbd { border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; backg
 .player-header span { display: block; color: var(--accent); font-size: 10px; font-weight: 700; }
 .player-header h2 { margin: 4px 0 0; font-size: 15px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .player-header > div:last-child { display: flex; gap: 7px; }
+.player-status { align-self: center; color: var(--muted); font-size: 10px; font-weight: 500; }
 .player-stage { width: 100%; aspect-ratio: 16 / 9; background: #000; }
 .player-stage.vertical-mode { max-height: 67vh; aspect-ratio: 16 / 9; }
 .player-controls { padding: 18px 20px 22px; }
@@ -193,6 +207,12 @@ kbd { border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; backg
   .page { padding: 34px 28px 60px; }
   .featured-content { padding: 30px; }
   .media-grid { grid-template-columns: repeat(auto-fill, minmax(142px, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .live-search { width: 100%; }
+  .page-header { align-items: stretch; flex-direction: column; }
+  .import-url, .add-source { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

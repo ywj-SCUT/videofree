@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { DEFAULT_SOURCES } from './default-sources.js';
 import type { AppSettings, LibraryState } from './types.js';
 
 interface PersistedData {
@@ -10,7 +11,7 @@ interface PersistedData {
 
 const defaults: PersistedData = {
   settings: {
-    sources: [],
+    sources: DEFAULT_SOURCES,
     liveChannels: [],
     qualityPreference: 'highest',
   },
@@ -28,8 +29,29 @@ export class Storage {
     try {
       const raw = await readFile(this.file, 'utf8');
       const parsed = JSON.parse(raw) as Partial<PersistedData>;
+      const liveChannels = (parsed.settings?.liveChannels ?? []).map((channel) => ({
+        ...channel,
+        sourceId: channel.sourceId ?? 'legacy-live',
+        sourceName: channel.sourceName ?? '已导入直播',
+        urls: channel.urls?.length ? channel.urls : [channel.url],
+      }));
+      const persistedSources = parsed.settings?.sources ?? [];
+      const hasManagedDefaults = persistedSources.some((source) => source.id.startsWith('builtin-line-'));
+      const enabledById = new Map(persistedSources.map((source) => [source.id, source.enabled]));
+      const customSources = persistedSources.filter((source) => !source.id.startsWith('builtin-line-'));
+      const managedSources = hasManagedDefaults
+        ? DEFAULT_SOURCES.map((source) => ({ ...source, enabled: enabledById.get(source.id) ?? source.enabled }))
+        : [];
+      const sources = persistedSources.length
+        ? [...managedSources, ...customSources]
+        : structuredClone(DEFAULT_SOURCES);
       this.data = {
-        settings: { ...defaults.settings, ...parsed.settings },
+        settings: {
+          ...defaults.settings,
+          ...parsed.settings,
+          sources,
+          liveChannels,
+        },
         library: { ...defaults.library, ...parsed.library },
       };
     } catch {

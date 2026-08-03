@@ -10,6 +10,12 @@ export interface PlayLine {
   episodes: Episode[];
 }
 
+export interface MediaVariant {
+  id: string;
+  sourceId: string;
+  sourceName: string;
+}
+
 export interface MediaItem {
   id: string;
   sourceId: string;
@@ -26,6 +32,7 @@ export interface MediaItem {
   area?: string;
   playLines?: PlayLine[];
   quality?: string;
+  alternatives?: MediaVariant[];
 }
 
 export interface CmsSource {
@@ -42,10 +49,21 @@ export interface CmsSource {
 
 export interface LiveChannel {
   id: string;
+  sourceId: string;
+  sourceName: string;
   name: string;
   group: string;
   url: string;
+  urls?: string[];
   logo?: string;
+  tvgId?: string;
+}
+
+export interface ImportResult {
+  importedSources: number;
+  importedLives: number;
+  failures: string[];
+  settings: AppSettings;
 }
 
 export interface SearchResponse {

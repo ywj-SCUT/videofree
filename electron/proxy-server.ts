@@ -41,9 +41,9 @@ function imageDimension(value: string | null, fallback: number): number {
   return Number.isFinite(parsed) ? Math.min(1920, Math.max(64, Math.round(parsed))) : fallback;
 }
 
-async function downloadImage(target: string, dispatcher?: ProxyAgent): Promise<Buffer> {
+async function downloadImage(target: string, dispatcher?: ProxyAgent, timeoutMs = 12_000): Promise<Buffer> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const upstream = await undiciFetch(target, { headers: defaultHeaders, redirect: 'follow', signal: controller.signal, dispatcher });
     if (!upstream.ok) throw new Error(`Upstream HTTP ${upstream.status}`);
@@ -59,16 +59,55 @@ async function downloadImage(target: string, dispatcher?: ProxyAgent): Promise<B
 
 async function fetchImage(target: string, dispatcher: ProxyAgent): Promise<Buffer> {
   try {
-    return await downloadImage(target, dispatcher);
+    return await downloadImage(target, undefined, 4_500);
   } catch {
-    return downloadImage(target);
+    return downloadImage(target, dispatcher);
   }
+}
+
+function createLimiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    active++;
+    try {
+      return await task();
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
+
+async function fetchHeaders(target: string, headers: Record<string, string>, dispatcher?: ProxyAgent, timeoutMs = 5_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await undiciFetch(target, { headers, redirect: 'follow', dispatcher, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchStream(target: string, headers: Record<string, string>, dispatcher: ProxyAgent) {
+  try {
+    const direct = await fetchHeaders(target, headers);
+    if (direct.ok || direct.status === 206) return direct;
+    await direct.body?.cancel();
+  } catch {
+    // Fall through to the configured local proxy.
+  }
+  return fetchHeaders(target, headers, dispatcher, 15_000);
 }
 
 export async function startProxyServer(cacheDirectory: string): Promise<{ port: number; close: () => Promise<void> }> {
   let port = 0;
   await mkdir(cacheDirectory, { recursive: true });
-  const outboundProxy = new ProxyAgent(process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY ?? 'http://127.0.0.1:7890');
+  const proxyUrl = process.env.VIDEOGET_PROXY ?? process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY ?? 'http://127.0.0.1:7890';
+  const imageOutboundProxy = new ProxyAgent(proxyUrl);
+  const streamOutboundProxy = new ProxyAgent(proxyUrl);
+  const limitImages = createLimiter(4);
   const pendingImages = new Map<string, Promise<Buffer>>();
   const server = http.createServer(async (request, response) => {
     response.setHeader('Access-Control-Allow-Origin', '*');
@@ -99,13 +138,13 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
         } catch {
           let pending = pendingImages.get(cacheKey);
           if (!pending) {
-            pending = fetchImage(target, outboundProxy)
+            pending = limitImages(() => fetchImage(target, imageOutboundProxy)
               .then((input) => sharp(input, { failOn: 'warning', limitInputPixels: 50_000_000 })
                 .rotate()
                 .resize(width, height, { fit: 'cover', position: 'attention', kernel: sharp.kernel.lanczos3 })
                 .sharpen({ sigma: 0.8 })
                 .webp({ quality: 88, effort: 4 })
-                .toBuffer())
+                .toBuffer()))
               .then(async (output) => { await writeFile(cachePath, output); return output; })
               .finally(() => pendingImages.delete(cacheKey));
             pendingImages.set(cacheKey, pending);
@@ -137,7 +176,7 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
       const referer = incoming.searchParams.get('referer');
       if (referer) headers.Referer = referer;
       if (request.headers.range) headers.Range = request.headers.range;
-      const upstream = await fetch(target, { headers, redirect: 'follow' });
+      const upstream = await fetchStream(target, headers, streamOutboundProxy);
       if (!upstream.ok && upstream.status !== 206) {
         response.writeHead(upstream.status).end(`Upstream HTTP ${upstream.status}`);
         return;
@@ -187,7 +226,7 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
     port,
     close: async () => {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-      await outboundProxy.close();
+      await Promise.all([imageOutboundProxy.close(), streamOutboundProxy.close()]);
     },
   };
 }

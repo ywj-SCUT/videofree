@@ -1,15 +1,77 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { aggregateSearch, getDetail, importTvBox, testSource } from './source-engine.js';
+import { aggregateSearch, getDetail, importTvBox, resolveMedia, testSource } from './source-engine.js';
+import { mergeLiveChannels, parseLivePlaylist } from './live-engine.js';
+import { fetchRemoteText } from './net-client.js';
 import { startProxyServer } from './proxy-server.js';
 import { Storage } from './storage.js';
-import type { CmsSource, LibraryState, MediaCategory } from './types.js';
+import type { CmsSource, ImportResult, LibraryState, LiveChannel, MediaCategory } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let proxy: Awaited<ReturnType<typeof startProxyServer>> | null = null;
 const storage = new Storage();
+
+async function applyTvBoxImport(config: unknown): Promise<ImportResult> {
+  const imported = importTvBox(config);
+  const settings = storage.getSettings(proxy?.port ?? 0);
+  const sourcesById = new Map(settings.sources.map((source) => [source.id, source]));
+  imported.sources.forEach((source) => sourcesById.set(source.id, source));
+  const incomingLives = [...imported.lives];
+  const failures: string[] = [];
+
+  for (const playlist of imported.livePlaylists) {
+    try {
+      const content = await fetchRemoteText(playlist.url);
+      const channels = parseLivePlaylist(content, playlist.id, playlist.name);
+      if (channels.length) incomingLives.push(...channels);
+      else if (/\.m3u8(?:$|\?)/i.test(playlist.url)) {
+        incomingLives.push({
+          id: `${playlist.id}-direct`, sourceId: playlist.id, sourceName: playlist.name,
+          name: playlist.name, group: playlist.name, url: playlist.url, urls: [playlist.url],
+        });
+      } else failures.push(`${playlist.name}: 播放列表中没有频道`);
+    } catch (error) {
+      failures.push(`${playlist.name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const liveChannels = mergeLiveChannels(settings.liveChannels, incomingLives);
+  await storage.updateSettings({ sources: [...sourcesById.values()], liveChannels });
+  return {
+    importedSources: imported.sources.length,
+    importedLives: liveChannels.length - settings.liveChannels.length,
+    failures,
+    settings: storage.getSettings(proxy?.port ?? 0),
+  };
+}
+
+async function applyImportedContent(content: string, name: string, originUrl?: string): Promise<ImportResult> {
+  const trimmed = content.trim();
+  if (!trimmed) throw new Error('导入内容为空');
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return applyTvBoxImport(JSON.parse(trimmed));
+  }
+  const sourceId = `playlist-${Buffer.from(name).toString('base64url').slice(0, 32) || Date.now()}`;
+  let channels = parseLivePlaylist(trimmed, sourceId, name || '导入直播');
+  if (!channels.length && originUrl && /\.m3u8(?:$|\?)/i.test(originUrl)) {
+    channels = [{
+      id: `${sourceId}-direct`, sourceId, sourceName: name,
+      name, group: name, url: originUrl, urls: [originUrl],
+    }];
+  }
+  if (!channels.length) throw new Error('未识别到 TVBox 配置或直播频道');
+  const settings = storage.getSettings(proxy?.port ?? 0);
+  const liveChannels = mergeLiveChannels(settings.liveChannels, channels);
+  await storage.updateSettings({ liveChannels });
+  return {
+    importedSources: 0,
+    importedLives: liveChannels.length - settings.liveChannels.length,
+    failures: [],
+    settings: storage.getSettings(proxy?.port ?? 0),
+  };
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -53,16 +115,13 @@ function registerIpc(): void {
     await storage.updateSettings({ qualityPreference: quality });
     return storage.getSettings(proxy?.port ?? 0);
   });
-  ipcMain.handle('settings:import-tvbox', async (_event, config: unknown) => {
-    const imported = importTvBox(config);
-    const settings = storage.getSettings(proxy?.port ?? 0);
-    const sourcesById = new Map(settings.sources.map((source) => [source.id, source]));
-    imported.sources.forEach((source) => sourcesById.set(source.id, source));
-    await storage.updateSettings({
-      sources: [...sourcesById.values()],
-      liveChannels: [...settings.liveChannels, ...imported.lives],
-    });
-    return { importedSources: imported.sources.length, importedLives: imported.lives.length, settings: storage.getSettings(proxy?.port ?? 0) };
+  ipcMain.handle('settings:import-tvbox', (_event, config: unknown) => applyTvBoxImport(config));
+  ipcMain.handle('settings:import-content', (_event, content: string, name: string) => applyImportedContent(content, name));
+  ipcMain.handle('settings:import-url', async (_event, url: string) => {
+    const content = await fetchRemoteText(url);
+    const parsed = new URL(url);
+    const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() ?? parsed.hostname);
+    return applyImportedContent(content, name, url);
   });
   ipcMain.handle('settings:test-source', (_event, source: CmsSource) => testSource(source));
   ipcMain.handle('media:search', async (_event, query: string, category: MediaCategory) => {
@@ -72,6 +131,10 @@ function registerIpc(): void {
   ipcMain.handle('media:detail', async (_event, sourceId: string, id: string) => {
     const settings = storage.getSettings(proxy?.port ?? 0);
     return getDetail(settings.sources, sourceId, id);
+  });
+  ipcMain.handle('media:resolve', async (_event, item) => {
+    const settings = storage.getSettings(proxy?.port ?? 0);
+    return resolveMedia(settings.sources, item);
   });
   ipcMain.handle('library:get', () => storage.getLibrary());
   ipcMain.handle('library:save', async (_event, library: LibraryState) => {

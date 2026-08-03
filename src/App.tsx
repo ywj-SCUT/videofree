@@ -6,7 +6,7 @@ import {
   Maximize2, Minimize2, Minus, MonitorPlay, Play, Plus, Radio, Search,
   Settings, Sparkles, Star, Trash2, Tv, Upload, X,
 } from 'lucide-react';
-import type { AppSettings, CmsSource, LibraryState, MediaCategory, MediaItem } from './types';
+import type { AppSettings, CmsSource, LibraryState, LiveChannel, MediaCategory, MediaItem } from './types';
 
 type View = 'discover' | 'search' | 'shorts' | 'live' | 'library' | 'settings';
 
@@ -30,6 +30,66 @@ const navItems: Array<{ id: View; label: string; icon: typeof Compass }> = [
 const emptySettings: AppSettings = { sources: [], liveChannels: [], qualityPreference: 'highest', proxyPort: 0 };
 const emptyLibrary: LibraryState = { favorites: [], history: [] };
 
+type QualityPreference = AppSettings['qualityPreference'];
+
+function levelLabel(level: Hls['levels'][number], index: number): string {
+  if (level.height >= 2160) return '4K';
+  if (level.height >= 1440) return '2K';
+  if (level.height > 0) return `${level.height}P`;
+  if (level.bitrate > 0) return `${(level.bitrate / 1_000_000).toFixed(1)} Mbps`;
+  return `画质 ${index + 1}`;
+}
+
+function preferredLevel(levels: Hls['levels'], preference: QualityPreference): number {
+  if (preference === 'auto' || !levels.length) return -1;
+  if (preference === 'highest') return levels.reduce((best, level, index) => {
+    const bestLevel = levels[best];
+    return level.height > bestLevel.height || (level.height === bestLevel.height && level.bitrate > bestLevel.bitrate) ? index : best;
+  }, 0);
+  const target = preference === '1080p' ? 1080 : 720;
+  return levels.reduce((best, level, index) => {
+    const distance = Math.abs((level.height || target) - target);
+    const bestDistance = Math.abs((levels[best].height || target) - target);
+    return distance < bestDistance || (distance === bestDistance && level.bitrate > levels[best].bitrate) ? index : best;
+  }, 0);
+}
+
+function attachHls(video: HTMLVideoElement, sourceUrl: string, art: Artplayer, preference: QualityPreference, onQuality?: (label: string) => void, lowLatencyMode = false): void {
+  if (!Hls.isSupported()) {
+    if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = sourceUrl;
+    return;
+  }
+  const hls = new Hls({ enableWorker: true, lowLatencyMode });
+  art.hls = hls;
+  hls.loadSource(sourceUrl);
+  hls.attachMedia(video);
+  hls.on(Hls.Events.MANIFEST_PARSED, () => {
+    const selectedLevel = preferredLevel(hls.levels, preference);
+    hls.currentLevel = selectedLevel;
+    const choices = [{ html: '自动', level: -1 }, ...hls.levels.map((level, index) => ({ html: levelLabel(level, index), level: index }))];
+    const selectedLabel = selectedLevel < 0 ? '自动' : levelLabel(hls.levels[selectedLevel], selectedLevel);
+    if (art.setting.find('videoget-quality')) art.setting.remove('videoget-quality');
+    art.setting.add({
+      name: 'videoget-quality',
+      html: '画质',
+      tooltip: selectedLabel,
+      selector: choices.map((choice) => ({ ...choice, default: choice.level === selectedLevel })),
+      onSelect(item) {
+        hls.currentLevel = Number(item.level);
+        if (item.$parent?.$tooltip) item.$parent.$tooltip.textContent = String(item.html);
+        onQuality?.(String(item.html));
+        return item.html;
+      },
+    });
+    onQuality?.(selectedLabel);
+  });
+  hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+    const label = levelLabel(hls.levels[data.level], data.level);
+    onQuality?.(hls.autoLevelEnabled ? `自动 · ${label}` : label);
+  });
+  art.on('destroy', () => hls.destroy());
+}
+
 function imageUrl(source: string, proxyPort: number, width: number, height: number): string {
   if (!source || !proxyPort || !/^https?:\/\//i.test(source)) return source;
   const params = new URLSearchParams({ url: source, w: String(width), h: String(height) });
@@ -46,6 +106,7 @@ function App() {
   const [settings, setSettings] = useState<AppSettings>(emptySettings);
   const [library, setLibrary] = useState<LibraryState>(emptyLibrary);
   const [selected, setSelected] = useState<MediaItem | null>(null);
+  const [selectedLive, setSelectedLive] = useState<LiveChannel | null>(null);
   const [activeTab, setActiveTab] = useState<'favorites' | 'history'>('favorites');
   const searchTimer = useRef<number>();
 
@@ -90,7 +151,7 @@ function App() {
   const openMedia = async (item: MediaItem) => {
     setLoading(true);
     try {
-      const detail = item.playLines?.length ? item : await window.lumen.detail(item.sourceId, item.id);
+      const detail = await window.lumen.resolve(item);
       setSelected(detail ?? item);
     } finally {
       setLoading(false);
@@ -149,7 +210,7 @@ function App() {
             meta={searchMeta} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} proxyPort={settings.proxyPort} />
         )}
         {view === 'shorts' && <ShortsView items={items} loading={loading} onOpen={openMedia} onMode={(mode) => { setCategory(mode); void searchMedia('', mode); }} mode={category} proxyPort={settings.proxyPort} />}
-        {view === 'live' && <LiveView settings={settings} onOpenSettings={() => navigate('settings')} />}
+        {view === 'live' && <LiveView settings={settings} onOpenSettings={() => navigate('settings')} onPlay={setSelectedLive} />}
         {view === 'library' && <LibraryView library={library} activeTab={activeTab} setActiveTab={setActiveTab} onOpen={openMedia} onRemove={toggleFavorite} proxyPort={settings.proxyPort} />}
         {view === 'settings' && <SettingsView settings={settings} onSettings={setSettings} />}
       </main>
@@ -158,6 +219,7 @@ function App() {
         <PlayerSheet item={selected} settings={settings} isFavorite={favoriteKeys.has(`${selected.sourceId}:${selected.id}`)}
           onClose={() => setSelected(null)} onFavorite={() => toggleFavorite(selected)} onProgress={updateProgress} />
       )}
+      {selectedLive && <LivePlayerSheet channel={selectedLive} settings={settings} onClose={() => setSelectedLive(null)} />}
     </div>
   );
 }
@@ -193,9 +255,20 @@ function ShortsView({ items, loading, onOpen, mode, onMode, proxyPort }: { items
   </div>;
 }
 
-function LiveView({ settings, onOpenSettings }: { settings: AppSettings; onOpenSettings: () => void }) {
-  return <div className="page"><header className="page-header"><div><span className="eyebrow">实时频道</span><h1>直播</h1></div></header>
-    {settings.liveChannels.length ? <div className="live-list">{settings.liveChannels.map((channel) => <div className="live-row" key={channel.id}><span className="live-icon"><Radio size={18} /></span><div><strong>{channel.name}</strong><small>{channel.group}</small></div><button className="icon-button"><Play size={17} fill="currentColor" /></button></div>)}</div> : <EmptyState icon={Tv} title="尚未添加直播源" text="导入 TVBox 配置或 M3U 播放列表后，频道会显示在这里。" action={<button className="secondary-button" onClick={onOpenSettings}>管理来源</button>} />}
+function LiveView({ settings, onOpenSettings, onPlay }: { settings: AppSettings; onOpenSettings: () => void; onPlay: (channel: LiveChannel) => void }) {
+  const [liveQuery, setLiveQuery] = useState('');
+  const [group, setGroup] = useState('全部');
+  const groups = useMemo(() => ['全部', ...new Set(settings.liveChannels.map((channel) => channel.group).filter(Boolean))], [settings.liveChannels]);
+  const normalizedQuery = liveQuery.trim().toLowerCase();
+  const channels = settings.liveChannels.filter((channel) => {
+    const matchesGroup = group === '全部' || channel.group === group;
+    const matchesQuery = !normalizedQuery || `${channel.name} ${channel.group} ${channel.sourceName}`.toLowerCase().includes(normalizedQuery);
+    return matchesGroup && matchesQuery;
+  });
+  useEffect(() => { if (!groups.includes(group)) setGroup('全部'); }, [group, groups]);
+
+  return <div className="page live-page"><header className="page-header"><div><span className="eyebrow">实时频道</span><h1>直播</h1></div>{settings.liveChannels.length > 0 && <div className="live-search"><Search size={17} /><input value={liveQuery} onChange={(event) => setLiveQuery(event.target.value)} placeholder="搜索频道" />{liveQuery && <button onClick={() => setLiveQuery('')}><X size={16} /></button>}</div>}</header>
+    {settings.liveChannels.length ? <><div className="live-toolbar"><div className="line-tabs live-groups">{groups.map((item) => <button key={item} className={group === item ? 'active' : ''} onClick={() => setGroup(item)}>{item}</button>)}</div><span>{channels.length} 个频道</span></div>{channels.length ? <div className="live-list">{channels.map((channel) => <button className="live-row" key={channel.id} onClick={() => onPlay(channel)}><span className="live-icon">{channel.logo ? <img src={imageUrl(channel.logo, settings.proxyPort, 96, 96)} alt="" /> : <Radio size={18} />}</span><div><strong>{channel.name}</strong><small>{channel.group} · {channel.sourceName}{(channel.urls?.length ?? 1) > 1 ? ` · ${channel.urls?.length} 条线路` : ''}</small></div><span className="icon-button"><Play size={17} fill="currentColor" /></span></button>)}</div> : <EmptyState icon={Search} title="没有匹配的频道" text="调整关键词或频道分组。" />}</> : <EmptyState icon={Tv} title="尚未添加直播源" text="导入 TVBox 配置或 M3U 播放列表后，频道会显示在这里。" action={<button className="secondary-button" onClick={onOpenSettings}>管理来源</button>} />}
   </div>;
 }
 
@@ -215,6 +288,8 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
   const [api, setApi] = useState('');
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
+  const [importUrl, setImportUrl] = useState('');
+  const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const saveSources = async (sources: CmsSource[]) => onSettings(await window.lumen.saveSources(sources));
@@ -225,13 +300,31 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
   };
   const importFile = async (file?: File) => {
     if (!file) return;
+    setImporting(true);
     try {
-      const config = JSON.parse(await file.text());
-      const result = await window.lumen.importTvBox(config);
+      const result = await window.lumen.importContent(await file.text(), file.name);
       onSettings(result.settings);
-      setTestResult((current) => ({ ...current, import: `已导入 ${result.importedSources} 个点播源、${result.importedLives} 个直播源` }));
+      const failures = result.failures.length ? `，${result.failures.length} 项失败` : '';
+      setTestResult((current) => ({ ...current, import: `已导入 ${result.importedSources} 个点播源、${result.importedLives} 个直播频道${failures}` }));
     } catch (error) {
       setTestResult((current) => ({ ...current, import: error instanceof Error ? error.message : '导入失败' }));
+    } finally {
+      setImporting(false);
+    }
+  };
+  const importRemoteUrl = async () => {
+    if (!/^https?:\/\//i.test(importUrl.trim())) return;
+    setImporting(true);
+    try {
+      const result = await window.lumen.importUrl(importUrl.trim());
+      onSettings(result.settings);
+      const failures = result.failures.length ? `，${result.failures.length} 项失败` : '';
+      setTestResult((current) => ({ ...current, import: `已导入 ${result.importedSources} 个点播源、${result.importedLives} 个直播频道${failures}` }));
+      setImportUrl('');
+    } catch (error) {
+      setTestResult((current) => ({ ...current, import: error instanceof Error ? error.message : '导入失败' }));
+    } finally {
+      setImporting(false);
     }
   };
   const test = async (source: CmsSource) => {
@@ -241,8 +334,9 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
     setTesting(null);
   };
   return <div className="page settings-page"><header className="page-header"><div><span className="eyebrow">本机配置</span><h1>设置</h1></div></header>
-    <section className="settings-section"><div className="settings-heading"><div><h2>视频来源</h2><p>支持苹果 CMS API 与 TVBox type 1 / 内联 Spider 规则。</p></div><button className="secondary-button" onClick={() => fileRef.current?.click()}><Upload size={16} />导入 TVBox</button><input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(event) => void importFile(event.target.files?.[0])} /></div>
+    <section className="settings-section"><div className="settings-heading"><div><h2>视频来源</h2><p>支持苹果 CMS、TVBox 配置以及 M3U/M3U8 直播列表。</p></div><button className="secondary-button" disabled={importing} onClick={() => fileRef.current?.click()}><Upload size={16} />{importing ? '导入中' : '导入文件'}</button><input ref={fileRef} type="file" accept=".json,.txt,.m3u,.m3u8,application/json,audio/x-mpegurl" hidden onChange={(event) => { void importFile(event.target.files?.[0]); event.currentTarget.value = ''; }} /></div>
       {testResult.import && <div className="inline-notice"><Check size={15} />{testResult.import}</div>}
+      <div className="import-url"><input value={importUrl} onChange={(event) => setImportUrl(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void importRemoteUrl(); }} placeholder="TVBox 或 M3U 远程地址" /><button className="secondary-button" disabled={importing || !/^https?:\/\//i.test(importUrl.trim())} onClick={() => void importRemoteUrl()}><Upload size={16} />导入 URL</button></div>
       <div className="add-source"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="来源名称" /><input value={api} onChange={(event) => setApi(event.target.value)} placeholder="https://example.com/api.php/provide/vod/" /><button className="primary-button" onClick={addSource}><Plus size={16} />添加</button></div>
       <div className="source-list"><div className="source-row builtin"><span className="source-logo"><Film size={17} /></span><div><strong>开放影院</strong><small>内置演示 · 可验证高清播放</small></div><span className="source-state"><span className="status-dot" />已启用</span></div>
         {settings.sources.map((source) => <div className="source-row" key={source.id}><button className={source.enabled ? 'toggle on' : 'toggle'} onClick={() => void saveSources(settings.sources.map((entry) => entry.id === source.id ? { ...entry, enabled: !entry.enabled } : entry))}><span /></button><div><strong>{source.name}</strong><small>{source.type === 'cms' ? source.api : 'Spider 规则'}</small>{testResult[source.id] && <em>{testResult[source.id]}</em>}</div><button className="text-button" onClick={() => void test(source)} disabled={testing === source.id}>{testing === source.id ? '检测中' : '检测'}</button><button className="icon-button danger" onClick={() => void saveSources(settings.sources.filter((entry) => entry.id !== source.id))}><Trash2 size={16} /></button></div>)}
@@ -257,7 +351,7 @@ interface MediaGridProps { items: MediaItem[]; loading: boolean; onOpen: (item: 
 function MediaGrid({ items, loading, onOpen, favoriteKeys, onFavorite, proxyPort }: MediaGridProps) {
   if (loading && !items.length) return <LoadingGrid />;
   if (!items.length) return <EmptyState icon={Search} title="没有找到相关内容" text="换个关键词，或在设置中添加更多视频来源。" />;
-  return <div className="media-grid">{items.map((item) => <article className="media-card" key={`${item.sourceId}:${item.id}`}><button className="poster-button" onClick={() => onOpen(item)}><img src={imageUrl(item.poster, proxyPort, 800, 1200)} alt={item.title} loading="lazy" /><span className="poster-shade" /><span className="play-button"><Play size={20} fill="currentColor" /></span>{item.quality && <span className="quality-badge">{item.quality}</span>}<span className="source-badge">{item.sourceName}</span></button><div className="media-info"><button onClick={() => onOpen(item)}><strong>{item.title}</strong><span>{[item.year, item.remarks].filter(Boolean).join(' · ')}</span></button><button className={favoriteKeys.has(`${item.sourceId}:${item.id}`) ? 'heart-button active' : 'heart-button'} onClick={() => onFavorite(item)}><Heart size={16} fill={favoriteKeys.has(`${item.sourceId}:${item.id}`) ? 'currentColor' : 'none'} /></button></div></article>)}</div>;
+  return <div className="media-grid">{items.map((item) => { const sourceCount = item.alternatives?.length ?? 1; return <article className="media-card" key={`${item.sourceId}:${item.id}`}><button className="poster-button" onClick={() => onOpen(item)}><img src={imageUrl(item.poster, proxyPort, 800, 1200)} alt={item.title} loading="lazy" /><span className="poster-shade" /><span className="play-button"><Play size={20} fill="currentColor" /></span>{item.quality && <span className="quality-badge">{item.quality}</span>}<span className="source-badge">{sourceCount > 1 ? `${sourceCount} 个来源` : item.sourceName}</span></button><div className="media-info"><button onClick={() => onOpen(item)}><strong>{item.title}</strong><span>{[item.year, item.remarks].filter(Boolean).join(' · ')}</span></button><button className={favoriteKeys.has(`${item.sourceId}:${item.id}`) ? 'heart-button active' : 'heart-button'} onClick={() => onFavorite(item)}><Heart size={16} fill={favoriteKeys.has(`${item.sourceId}:${item.id}`) ? 'currentColor' : 'none'} /></button></div></article>; })}</div>;
 }
 
 function LoadingGrid() { return <div className="media-grid">{Array.from({ length: 10 }, (_, index) => <div className="media-card skeleton" key={index}><div className="skeleton-poster" /><div className="skeleton-line" /><div className="skeleton-line short" /></div>)}</div>; }
@@ -270,10 +364,12 @@ function PlayerSheet({ item, settings, isFavorite, onClose, onFavorite, onProgre
   const [episodeIndex, setEpisodeIndex] = useState(0);
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Artplayer | null>(null);
+  const [qualityLabel, setQualityLabel] = useState('检测画质');
   const current = lines[lineIndex]?.episodes[episodeIndex];
 
   useEffect(() => {
     if (!container.current || !current) return;
+    setQualityLabel('检测画质');
     const originalUrl = current.url;
     const useProxy = settings.proxyPort > 0 && /^https?:\/\//i.test(originalUrl);
     const url = useProxy ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(originalUrl)}` : originalUrl;
@@ -295,12 +391,7 @@ function PlayerSheet({ item, settings, isFavorite, onClose, onFavorite, onProgre
       type: /m3u8(?:$|\?)/i.test(originalUrl) ? 'm3u8' : undefined,
       customType: {
         m3u8: (video, sourceUrl, art) => {
-          if (Hls.isSupported()) {
-            const hls = new Hls({ enableWorker: true, startLevel: settings.qualityPreference === 'highest' ? -1 : undefined });
-            hls.loadSource(sourceUrl);
-            hls.attachMedia(video);
-            art.on('destroy', () => hls.destroy());
-          } else if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = sourceUrl;
+          attachHls(video, sourceUrl, art, settings.qualityPreference, setQualityLabel);
         },
       },
     });
@@ -314,13 +405,57 @@ function PlayerSheet({ item, settings, isFavorite, onClose, onFavorite, onProgre
     instance.on('video:ended', () => {
       if (episodeIndex + 1 < (lines[lineIndex]?.episodes.length ?? 0)) setEpisodeIndex((value) => value + 1);
     });
+    instance.on('video:loadedmetadata', () => {
+      if (!/m3u8(?:$|\?)/i.test(originalUrl) && instance.video.videoHeight > 0) setQualityLabel(`${instance.video.videoHeight}P`);
+    });
     player.current = instance;
     return () => { instance.destroy(false); player.current = null; };
   }, [current?.url, lineIndex, episodeIndex, settings.proxyPort, settings.qualityPreference]);
 
-  return <div className="player-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="player-sheet"><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title}</h2></div><div><button className={isFavorite ? 'icon-button active' : 'icon-button'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" onClick={onClose}><X size={20} /></button></div></header>
+  return <div className="player-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="player-sheet"><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title}</h2></div><div><small className="player-status">{qualityLabel}</small><button className={isFavorite ? 'icon-button active' : 'icon-button'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" onClick={onClose}><X size={20} /></button></div></header>
     {current ? <><div className={item.category === 'short' || item.category === 'ai-short' ? 'player-stage vertical-mode' : 'player-stage'} ref={container} /><div className="player-controls"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div></> : <EmptyState icon={Film} title="暂无可播放线路" text="当前来源没有返回有效播放地址，请尝试其他来源。" />}
   </section></div>;
+}
+
+function LivePlayerSheet({ channel, settings, onClose }: { channel: LiveChannel; settings: AppSettings; onClose: () => void }) {
+  const urls = channel.urls?.length ? channel.urls : [channel.url];
+  const [urlIndex, setUrlIndex] = useState(0);
+  const [status, setStatus] = useState('正在连接');
+  const container = useRef<HTMLDivElement>(null);
+  const originalUrl = urls[urlIndex] ?? channel.url;
+
+  useEffect(() => {
+    if (!container.current || !originalUrl) return;
+    setStatus('正在连接');
+    const useProxy = settings.proxyPort > 0 && /^https?:\/\//i.test(originalUrl);
+    const url = useProxy ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(originalUrl)}` : originalUrl;
+    const instance = new Artplayer({
+      container: container.current,
+      url,
+      autoplay: true,
+      volume: 0.8,
+      isLive: true,
+      fullscreen: true,
+      fullscreenWeb: true,
+      pip: true,
+      setting: true,
+      hotkey: true,
+      theme: '#ffffff',
+      lang: 'zh-cn',
+      type: /m3u8(?:$|\?)/i.test(originalUrl) ? 'm3u8' : undefined,
+      customType: {
+        m3u8: (video, sourceUrl, art) => {
+          attachHls(video, sourceUrl, art, settings.qualityPreference, undefined, true);
+        },
+      },
+    });
+    instance.on('video:playing', () => setStatus('正在播放'));
+    instance.on('video:waiting', () => setStatus('正在缓冲'));
+    instance.on('video:error', () => setStatus('当前线路播放失败'));
+    return () => instance.destroy(false);
+  }, [originalUrl, settings.proxyPort]);
+
+  return <div className="player-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="player-sheet live-player-sheet"><header className="player-header"><div><span>{channel.group} · {channel.sourceName}</span><h2>{channel.name}</h2></div><div><small className="player-status">{status}</small><button className="icon-button" onClick={onClose}><X size={20} /></button></div></header><div className="player-stage" ref={container} />{urls.length > 1 && <div className="player-controls"><div className="line-tabs">{urls.map((_url, index) => <button key={`${channel.id}-${index}`} className={urlIndex === index ? 'active' : ''} onClick={() => setUrlIndex(index)}>线路 {index + 1}</button>)}</div></div>}</section></div>;
 }
 
 export default App;

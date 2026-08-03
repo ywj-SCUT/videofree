@@ -4,10 +4,13 @@ import type { AppSettings, CmsSource, LibraryState, MediaCategory } from './type
 const api = {
   search: (query: string, category: MediaCategory) => ipcRenderer.invoke('media:search', query, category),
   detail: (sourceId: string, id: string) => ipcRenderer.invoke('media:detail', sourceId, id),
+  resolve: (item: unknown) => ipcRenderer.invoke('media:resolve', item),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   saveSources: (sources: CmsSource[]) => ipcRenderer.invoke('settings:sources', sources),
   saveQuality: (quality: AppSettings['qualityPreference']) => ipcRenderer.invoke('settings:quality', quality),
   importTvBox: (config: unknown) => ipcRenderer.invoke('settings:import-tvbox', config),
+  importContent: (content: string, name: string) => ipcRenderer.invoke('settings:import-content', content, name),
+  importUrl: (url: string) => ipcRenderer.invoke('settings:import-url', url),
   testSource: (source: CmsSource) => ipcRenderer.invoke('settings:test-source', source),
   getLibrary: (): Promise<LibraryState> => ipcRenderer.invoke('library:get'),
   saveLibrary: (library: LibraryState) => ipcRenderer.invoke('library:save', library),
