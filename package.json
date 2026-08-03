@@ -17,10 +17,15 @@
     "smoke:danmaku": "npm run build && node scripts/danmaku-smoke.mjs",
     "smoke:hls-filter": "npm run build && npm run web:build && node scripts/hls-filter-smoke.mjs",
     "smoke:rules": "npm run build && npm run web:build && node scripts/rule-engine-smoke.mjs",
+    "smoke:tauri-runtime": "node scripts/tauri-runtime-smoke.mjs",
     "smoke:phase1": "npm run build && node scripts/tvbox-smoke.mjs && node scripts/aggregation-smoke.mjs && node scripts/source-smoke.mjs && npm run web:build && node scripts/web-smoke.mjs",
     "web:dev": "tsc -p tsconfig.node.json && next dev web --hostname 127.0.0.1",
     "web:build": "tsc -p tsconfig.node.json && next build web",
     "web:start": "next start web --hostname 127.0.0.1",
+    "tauri": "tauri",
+    "tauri:prepare": "npm run web:build && node scripts/prepare-tauri.mjs",
+    "tauri:dev": "npm run tauri:prepare && tauri dev --no-watch",
+    "tauri:build": "tauri build",
     "dist": "npm run build && electron-builder --win nsis portable",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p web/tsconfig.json --noEmit"
   },
@@ -37,6 +42,7 @@
     "undici": "^7.29.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
