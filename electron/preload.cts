@@ -11,6 +11,7 @@ const api = {
   importTvBox: (config: unknown) => ipcRenderer.invoke('settings:import-tvbox', config),
   importContent: (content: string, name: string) => ipcRenderer.invoke('settings:import-content', content, name),
   importUrl: (url: string) => ipcRenderer.invoke('settings:import-url', url),
+  importIptvCatalog: () => ipcRenderer.invoke('settings:import-iptv'),
   testSource: (source: CmsSource) => ipcRenderer.invoke('settings:test-source', source),
   getLibrary: (): Promise<LibraryState> => ipcRenderer.invoke('library:get'),
   saveLibrary: (library: LibraryState) => ipcRenderer.invoke('library:save', library),

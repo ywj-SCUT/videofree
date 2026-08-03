@@ -40,6 +40,7 @@ export interface LumenApi {
   importTvBox(config: unknown): Promise<ImportResult>;
   importContent(content: string, name: string): Promise<ImportResult>;
   importUrl(url: string): Promise<ImportResult>;
+  importIptvCatalog(): Promise<ImportResult>;
   testSource(source: CmsSource): Promise<{ ok: boolean; latencyMs: number; message: string }>;
   getLibrary(): Promise<LibraryState>;
   saveLibrary(library: LibraryState): Promise<LibraryState>;

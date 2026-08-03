@@ -53,13 +53,15 @@ async function request<T>(path: string, body: unknown): Promise<T> {
 
 function mergeImported(current: AppSettings, imported: { sources: CmsSource[]; lives: LiveChannel[]; failures?: string[] }): ImportResult {
   const sources = new Map(current.sources.map((source) => [source.id, source]));
+  const sourceCount = sources.size;
   imported.sources.forEach((source) => sources.set(source.id, source));
   const lives = new Map(current.liveChannels.map((channel) => [channel.id, channel]));
+  const liveCount = lives.size;
   imported.lives.forEach((channel) => lives.set(channel.id, channel));
   const next = saveSettings({ ...current, sources: [...sources.values()], liveChannels: [...lives.values()] });
   return {
-    importedSources: imported.sources.length,
-    importedLives: imported.lives.length,
+    importedSources: sources.size - sourceCount,
+    importedLives: lives.size - liveCount,
     failures: imported.failures ?? [],
     settings: next,
   };
@@ -88,6 +90,9 @@ export function installWebApi(): void {
     },
     async importUrl(url: string) {
       return mergeImported(settings(), await request('/api/import-url', { url }));
+    },
+    async importIptvCatalog() {
+      return mergeImported(settings(), await request('/api/iptv', {}));
     },
     testSource(source: CmsSource) {
       return request('/api/source-test', { source });

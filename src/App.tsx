@@ -4,7 +4,7 @@ import Hls from 'hls.js';
 import {
   Check, ChevronDown, Clock3, Compass, Film, Heart, LoaderCircle,
   Maximize2, Minimize2, Minus, MonitorPlay, Play, Plus, Radio, Search,
-  Settings, Sparkles, Star, Trash2, Tv, Upload, X,
+  RefreshCw, Settings, Sparkles, Star, Trash2, Tv, Upload, X,
 } from 'lucide-react';
 import type { AppSettings, CmsSource, HistoryItem, LibraryState, LiveChannel, MediaCategory, MediaItem } from './types';
 
@@ -365,6 +365,18 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
       setImporting(false);
     }
   };
+  const syncIptv = async () => {
+    setImporting(true);
+    try {
+      const result = await window.lumen.importIptvCatalog();
+      onSettings(result.settings);
+      setTestResult((current) => ({ ...current, import: `IPTV 目录已同步，新增 ${result.importedLives} 个频道` }));
+    } catch (error) {
+      setTestResult((current) => ({ ...current, import: error instanceof Error ? error.message : 'IPTV 同步失败' }));
+    } finally {
+      setImporting(false);
+    }
+  };
   const test = async (source: CmsSource) => {
     setTesting(source.id);
     const result = await window.lumen.testSource(source);
@@ -372,7 +384,7 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
     setTesting(null);
   };
   return <div className="page settings-page"><header className="page-header"><div><span className="eyebrow">本机配置</span><h1>设置</h1></div></header>
-    <section className="settings-section"><div className="settings-heading"><div><h2>视频来源</h2><p>支持苹果 CMS、TVBox 配置以及 M3U/M3U8 直播列表。</p></div><button className="secondary-button" disabled={importing} onClick={() => fileRef.current?.click()}><Upload size={16} />{importing ? '导入中' : '导入文件'}</button><input ref={fileRef} type="file" accept=".json,.txt,.m3u,.m3u8,application/json,audio/x-mpegurl" hidden onChange={(event) => { void importFile(event.target.files?.[0]); event.currentTarget.value = ''; }} /></div>
+    <section className="settings-section"><div className="settings-heading"><div><h2>视频来源</h2><p>支持苹果 CMS、TVBox 配置以及 M3U/M3U8 直播列表。</p></div><div className="settings-actions"><button className="secondary-button" disabled={importing} onClick={() => void syncIptv()}><RefreshCw size={16} />同步 IPTV</button><button className="secondary-button" disabled={importing} onClick={() => fileRef.current?.click()}><Upload size={16} />{importing ? '导入中' : '导入文件'}</button></div><input ref={fileRef} type="file" accept=".json,.txt,.m3u,.m3u8,application/json,audio/x-mpegurl" hidden onChange={(event) => { void importFile(event.target.files?.[0]); event.currentTarget.value = ''; }} /></div>
       {testResult.import && <div className="inline-notice"><Check size={15} />{testResult.import}</div>}
       <div className="import-url"><input value={importUrl} onChange={(event) => setImportUrl(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void importRemoteUrl(); }} placeholder="TVBox 或 M3U 远程地址" /><button className="secondary-button" disabled={importing || !/^https?:\/\//i.test(importUrl.trim())} onClick={() => void importRemoteUrl()}><Upload size={16} />导入 URL</button></div>
       <div className="add-source"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="来源名称" /><input value={api} onChange={(event) => setApi(event.target.value)} placeholder="https://example.com/api.php/provide/vod/" /><button className="primary-button" onClick={addSource}><Plus size={16} />添加</button></div>

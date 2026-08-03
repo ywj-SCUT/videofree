@@ -13,6 +13,7 @@
     "smoke:aggregation": "npm run build && node scripts/aggregation-smoke.mjs",
     "smoke:tvbox": "npm run build && node scripts/tvbox-smoke.mjs",
     "smoke:web": "npm run web:build && node scripts/web-smoke.mjs",
+    "smoke:iptv": "npm run build && node scripts/iptv-smoke.mjs",
     "smoke:phase1": "npm run build && node scripts/tvbox-smoke.mjs && node scripts/aggregation-smoke.mjs && node scripts/source-smoke.mjs && npm run web:build && node scripts/web-smoke.mjs",
     "web:dev": "next dev web --hostname 127.0.0.1",
     "web:build": "next build web",

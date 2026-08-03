@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { aggregateSearch, getDetail, importTvBox, resolveMedia, testSource } from './source-engine.js';
 import { mergeLiveChannels, parseLivePlaylist } from './live-engine.js';
+import { fetchIptvCatalog } from './iptv-catalog.js';
 import { fetchRemoteText } from './net-client.js';
 import { startProxyServer } from './proxy-server.js';
 import { Storage } from './storage.js';
@@ -80,6 +81,20 @@ async function applyImportedContent(content: string, name: string, originUrl?: s
   };
 }
 
+async function applyIptvCatalog(): Promise<ImportResult> {
+  const incoming = await fetchIptvCatalog();
+  if (!incoming.length) throw new Error('公开 IPTV 目录没有返回可用频道');
+  const settings = storage.getSettings(proxy?.port ?? 0);
+  const liveChannels = mergeLiveChannels(settings.liveChannels, incoming);
+  await storage.updateSettings({ liveChannels });
+  return {
+    importedSources: 0,
+    importedLives: liveChannels.length - settings.liveChannels.length,
+    failures: [],
+    settings: storage.getSettings(proxy?.port ?? 0),
+  };
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1420,
@@ -130,6 +145,7 @@ function registerIpc(): void {
     const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() ?? parsed.hostname);
     return applyImportedContent(content, name, url);
   });
+  ipcMain.handle('settings:import-iptv', () => applyIptvCatalog());
   ipcMain.handle('settings:test-source', (_event, source: CmsSource) => testSource(source));
   ipcMain.handle('media:search', async (_event, query: string, category: MediaCategory) => {
     const settings = storage.getSettings(proxy?.port ?? 0);
