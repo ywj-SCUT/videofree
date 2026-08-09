@@ -184,6 +184,10 @@ export async function resolveMedia(sources: CmsSource[], item: MediaItem): Promi
   const playLines = details.flatMap((detail) => (detail.playLines ?? []).map((line) => ({
     ...line,
     name: `${detail.sourceName} · ${line.name}`,
+    episodes: line.episodes.map((episode) => ({
+      ...episode,
+      sourceId: episode.sourceId ?? detail.sourceId,
+    })),
   })));
   const richest = details.reduce((best, detail) => {
     const score = (value: MediaItem) => (value.summary?.length ?? 0) + (value.poster ? 20 : 0) + (value.actors ? 10 : 0);

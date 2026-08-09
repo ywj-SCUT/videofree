@@ -21,6 +21,9 @@ const resolved = await resolveMedia(DEFAULT_SOURCES, shared);
 if (!resolved) throw new Error('跨来源详情解析为空');
 const lineSources = new Set((resolved.playLines ?? []).map((line) => line.name.split(' · ')[0]));
 if (lineSources.size < 2) throw new Error(`跨来源线路不足：${[...lineSources].join(', ')}`);
+const missingEpisodeSource = (resolved.playLines ?? []).some((line) =>
+  line.episodes.some((episode) => !episode.sourceId));
+if (missingEpisodeSource) throw new Error('跨来源线路存在缺失来源 ID 的剧集');
 
 const aiShorts = await aggregateSearch([], '', 'ai-short');
 if (!aiShorts.items.some((item) => item.category === 'ai-short')) throw new Error('AI 短剧分类没有可展示内容');
