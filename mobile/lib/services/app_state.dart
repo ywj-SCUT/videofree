@@ -2,16 +2,19 @@ import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import 'storage_service.dart';
 import 'api_client.dart';
+import 'local_engine.dart';
+import 'video_engine.dart';
 
-/// Central app state: sources, favorites, history, live channels, server config.
+/// Central app state: sources, favorites, history, live channels, engine config.
 class AppState extends ChangeNotifier {
   final StorageService _storage = StorageService();
-  ApiClient? _api;
+  VideoEngine? _engine;
 
   List<CmsSource> _sources = [];
   List<MediaItem> _favorites = [];
   List<HistoryItem> _history = [];
   List<LiveChannel> _liveChannels = [];
+  bool _localMode = true;
   String _serverUrl = 'http://10.0.2.2:3000';
   String _qualityPreference = 'highest';
 
@@ -19,13 +22,20 @@ class AppState extends ChangeNotifier {
   List<MediaItem> get favorites => _favorites;
   List<HistoryItem> get history => _history;
   List<LiveChannel> get liveChannels => _liveChannels;
+  bool get localMode => _localMode;
   String get serverUrl => _serverUrl;
   String get qualityPreference => _qualityPreference;
-  ApiClient get api => _api ??= ApiClient(baseUrl: _serverUrl);
+  VideoEngine get api => _engine ??= _buildEngine();
+
+  VideoEngine _buildEngine() {
+    if (_localMode) return LocalEngine();
+    return ApiClient(baseUrl: _serverUrl);
+  }
 
   Future<void> initialize() async {
+    _localMode = await _storage.getLocalMode();
     _serverUrl = await _storage.getServerUrl();
-    _api = ApiClient(baseUrl: _serverUrl);
+    _engine = _buildEngine();
     _sources = await _storage.getSources();
     _favorites = await _storage.getFavorites();
     _history = await _storage.getHistory();
@@ -34,9 +44,17 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateLocalMode(bool enabled) async {
+    if (_localMode == enabled) return;
+    _localMode = enabled;
+    _engine = _buildEngine();
+    await _storage.saveLocalMode(enabled);
+    notifyListeners();
+  }
+
   Future<void> updateServerUrl(String url) async {
     _serverUrl = url;
-    _api = ApiClient(baseUrl: url);
+    _engine = _buildEngine();
     await _storage.saveServerUrl(url);
     notifyListeners();
   }

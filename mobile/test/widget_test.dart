@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:videoget_mobile/models/models.dart';
+import 'package:videoget_mobile/services/media_url.dart';
 import 'package:videoget_mobile/services/quality_selector.dart';
 
 void main() {
@@ -49,5 +50,26 @@ void main() {
     expect(choosePreferredVideoTrack(tracks, '720p').id, 'low');
     expect(choosePreferredVideoTrack(tracks, 'auto').id, 'auto');
     expect(videoTrackLabel(tracks[1]), contains('1080P'));
+  });
+
+  test('relative media URLs resolve against the configured server', () {
+    const server = 'http://127.0.0.1:3000';
+
+    expect(
+      resolveMediaUrl(server, 'posters/sintel.jpg'),
+      'http://127.0.0.1:3000/posters/sintel.jpg',
+    );
+    expect(
+      resolveMediaUrl(server, '/posters/sintel.jpg'),
+      'http://127.0.0.1:3000/posters/sintel.jpg',
+    );
+    expect(
+      resolveMediaUrl(server, 'https://images.example/sintel.jpg'),
+      'https://images.example/sintel.jpg',
+    );
+    expect(
+      resolveMediaUrl('not-a-url', 'posters/sintel.jpg'),
+      'posters/sintel.jpg',
+    );
   });
 }

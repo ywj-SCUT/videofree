@@ -10,6 +10,7 @@ class StorageService {
   static const _serverKey = 'videoget.serverUrl';
   static const _qualityKey = 'videoget.quality';
   static const _liveKey = 'videoget.liveChannels';
+  static const _localModeKey = 'videoget.localMode';
 
   static const _defaultSources = [
     {
@@ -92,6 +93,16 @@ class StorageService {
   Future<String> getServerUrl() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_serverKey) ?? 'http://10.0.2.2:3000';
+  }
+
+  Future<bool> getLocalMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_localModeKey) ?? true;
+  }
+
+  Future<void> saveLocalMode(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_localModeKey, enabled);
   }
 
   Future<void> saveServerUrl(String url) async {

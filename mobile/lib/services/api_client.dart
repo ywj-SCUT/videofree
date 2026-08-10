@@ -1,9 +1,11 @@
 import 'package:dio/dio.dart';
 import '../models/models.dart';
 
-/// HTTP client that talks to the VideoGET Next.js API server.
-/// The server URL is user-configurable; Android emulator defaults to 10.0.2.2:3000.
-class ApiClient {
+import 'video_engine.dart';
+
+/// 远程 HTTP 引擎：通过电脑上运行的 VideoGET Next.js API 服务聚合内容。
+/// 适用于需要 Spider 规则源或电脑端代理的场景。
+class ApiClient implements VideoEngine {
   final Dio _dio;
   final String baseUrl;
 
@@ -17,6 +19,7 @@ class ApiClient {
         ),
       );
 
+  @override
   Future<SearchResponse> search(
     String query,
     MediaCategory category,
@@ -33,6 +36,7 @@ class ApiClient {
     return SearchResponse.fromJson(response.data as Map<String, dynamic>);
   }
 
+  @override
   Future<MediaItem?> detail(
     String sourceId,
     String id,
@@ -51,6 +55,7 @@ class ApiClient {
     return MediaItem.fromJson(data as Map<String, dynamic>);
   }
 
+  @override
   Future<MediaItem?> resolve(MediaItem item, List<CmsSource> sources) async {
     final response = await _dio.post(
       '/api/resolve',
@@ -64,6 +69,7 @@ class ApiClient {
     return MediaItem.fromJson(data as Map<String, dynamic>);
   }
 
+  @override
   Future<PlaybackResolution> play(
     String sourceId,
     String token,
@@ -80,11 +86,13 @@ class ApiClient {
     return PlaybackResolution.fromJson(response.data as Map<String, dynamic>);
   }
 
+  @override
   Future<ImportResult> importTvBox(dynamic config) async {
     final response = await _dio.post('/api/import', data: {'config': config});
     return ImportResult.fromJson(response.data as Map<String, dynamic>);
   }
 
+  @override
   Future<ImportResult> importContent(String content, String name) async {
     final response = await _dio.post(
       '/api/import',
@@ -93,11 +101,13 @@ class ApiClient {
     return ImportResult.fromJson(response.data as Map<String, dynamic>);
   }
 
+  @override
   Future<ImportResult> importUrl(String url) async {
     final response = await _dio.post('/api/import-url', data: {'url': url});
     return ImportResult.fromJson(response.data as Map<String, dynamic>);
   }
 
+  @override
   Future<ImportResult> importIptv() async {
     final response = await _dio.post('/api/iptv', data: {});
     return ImportResult.fromJson(response.data as Map<String, dynamic>);

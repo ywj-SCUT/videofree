@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../models/models.dart';
 import '../services/app_state.dart';
 import '../services/quality_selector.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_widgets.dart';
 
 class PlayerScreen extends StatefulWidget {
   final AppState appState;
@@ -12,6 +16,7 @@ class PlayerScreen extends StatefulWidget {
   final List<PlayLine> playLines;
   final int lineIndex;
   final int episodeIndex;
+
   const PlayerScreen({
     super.key,
     required this.appState,
@@ -73,6 +78,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _selectVideoTrack(VideoTrack track) async {
+    HapticFeedback.selectionClick();
     await _player.setVideoTrack(track);
     if (mounted) setState(() => _selectedTrackId = track.id);
   }
@@ -107,10 +113,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Duration(milliseconds: (resume.progress * 1000).round()),
         );
       }
-      setState(() => _loading = false);
-    } catch (e) {
+      if (mounted) setState(() => _loading = false);
+    } catch (error) {
+      if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = error.toString();
         _loading = false;
       });
     }
@@ -119,18 +126,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _saveProgress() async {
     final position = _player.state.position.inMilliseconds / 1000.0;
     final duration = _player.state.duration.inMilliseconds / 1000.0;
-    if (position > 0) {
-      await widget.appState.updateProgress(
-        widget.item,
-        position,
-        duration,
-        widget.playLines[_lineIndex].name,
-        _current.name,
-      );
-    }
+    if (position <= 0) return;
+    await widget.appState.updateProgress(
+      widget.item,
+      position,
+      duration,
+      widget.playLines[_lineIndex].name,
+      _current.name,
+    );
   }
 
   void _selectLine(int index) {
+    if (index == _lineIndex) return;
+    HapticFeedback.selectionClick();
     setState(() {
       _lineIndex = index;
       _episodeIndex = 0;
@@ -139,6 +147,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _selectEpisode(int index) {
+    if (index == _episodeIndex) return;
+    HapticFeedback.selectionClick();
     setState(() => _episodeIndex = index);
     _openCurrent();
   }
@@ -155,7 +165,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = Theme.of(context).colorScheme;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -167,159 +177,205 @@ class _PlayerScreenState extends State<PlayerScreen> {
               widget.item.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 16),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
             Text(
               _current.name,
-              style: TextStyle(
-                fontSize: 12,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
             ),
           ],
         ),
         actions: [
           PopupMenuButton<VideoTrack>(
             tooltip: '切换清晰度',
-            icon: const Icon(Icons.high_quality),
+            icon: const Icon(Icons.hd_outlined),
             onSelected: _selectVideoTrack,
-            itemBuilder: (context) => _videoTracks.map((track) {
-              return PopupMenuItem(
-                value: track,
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 24,
-                      child: track.id == _selectedTrackId
-                          ? const Icon(Icons.check, size: 18)
-                          : null,
+            itemBuilder: (context) => _videoTracks
+                .map(
+                  (track) => PopupMenuItem(
+                    value: track,
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 26,
+                          child: track.id == _selectedTrackId
+                              ? Icon(
+                                  Icons.check_rounded,
+                                  size: 18,
+                                  color: colors.primary,
+                                )
+                              : null,
+                        ),
+                        Expanded(child: Text(videoTrackLabel(track))),
+                      ],
                     ),
-                    Expanded(child: Text(videoTrackLabel(track))),
-                  ],
-                ),
-              );
-            }).toList(),
+                  ),
+                )
+                .toList(),
           ),
+          const SizedBox(width: 4),
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Stack(
-                alignment: Alignment.center,
+        top: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final landscape = constraints.maxWidth > constraints.maxHeight;
+            final video = _buildVideo(colors);
+            final playlist = _buildPlaylist(colors);
+            if (landscape) {
+              return Row(
                 children: [
-                  Video(
-                    controller: _videoController,
-                    controls: MaterialVideoControls,
-                  ),
-                  if (_loading) const CircularProgressIndicator(),
-                  if (_error != null)
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.error_outline,
-                            color: theme.colorScheme.error,
-                            size: 40,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _error!,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: theme.colorScheme.error,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          FilledButton(
-                            onPressed: _openCurrent,
-                            child: const Text('重试'),
-                          ),
-                        ],
+                  Expanded(child: Center(child: video)),
+                  DecoratedBox(
+                    decoration: const BoxDecoration(
+                      color: AppColors.surface,
+                      border: Border(
+                        left: BorderSide(color: AppColors.outline),
                       ),
                     ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (widget.playLines.length > 1) ...[
-                    Text(
-                      '播放线路',
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: widget.playLines.asMap().entries.map((entry) {
-                        return ChoiceChip(
-                          label: Text(entry.value.name),
-                          selected: entry.key == _lineIndex,
-                          onSelected: (_) => _selectLine(entry.key),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  Text(
-                    '剧集',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      fontSize: 13,
+                    child: SizedBox(
+                      width: math.min(360, constraints.maxWidth * 0.38),
+                      child: playlist,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: widget.playLines[_lineIndex].episodes
-                        .asMap()
-                        .entries
-                        .map((entry) {
-                          final selected = entry.key == _episodeIndex;
-                          return SizedBox(
-                            width: 72,
-                            child: OutlinedButton(
-                              onPressed: () => _selectEpisode(entry.key),
-                              style: OutlinedButton.styleFrom(
-                                backgroundColor: selected
-                                    ? theme.colorScheme.primaryContainer
-                                    : null,
-                                foregroundColor: selected
-                                    ? theme.colorScheme.onPrimaryContainer
-                                    : null,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 8,
-                                ),
-                                textStyle: const TextStyle(fontSize: 12),
-                              ),
-                              child: Text(
-                                entry.value.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          );
-                        })
-                        .toList(),
-                  ),
                 ],
-              ),
-            ),
-          ],
+              );
+            }
+            return Column(
+              children: [
+                video,
+                Expanded(child: playlist),
+              ],
+            );
+          },
         ),
       ),
+    );
+  }
+
+  Widget _buildVideo(ColorScheme colors) {
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Video(controller: _videoController, controls: MaterialVideoControls),
+          AnimatedSwitcher(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
+            child: _loading
+                ? const DecoratedBox(
+                    key: ValueKey('loading'),
+                    decoration: BoxDecoration(color: Color(0x66000000)),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                : const SizedBox.shrink(key: ValueKey('ready')),
+          ),
+          if (_error != null)
+            Positioned.fill(
+              child: ColoredBox(
+                color: const Color(0xE6000000),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.error_outline_rounded,
+                          color: colors.error,
+                          size: 36,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _error!,
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: colors.error, fontSize: 12),
+                        ),
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: _openCurrent,
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('重试'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlaylist(ColorScheme colors) {
+    final episodes = widget.playLines[_lineIndex].episodes;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        SectionHeading(
+          title: widget.playLines.length > 1 ? '播放线路' : '当前线路',
+          detail: widget.playLines[_lineIndex].name,
+        ),
+        if (widget.playLines.length > 1) ...[
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 42,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: widget.playLines.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) => ChoiceChip(
+                label: Text(widget.playLines[index].name),
+                selected: index == _lineIndex,
+                onSelected: (_) => _selectLine(index),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 22),
+        SectionHeading(title: '剧集', detail: '${episodes.length} 集'),
+        const SizedBox(height: 10),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 104,
+            mainAxisExtent: 44,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+          ),
+          itemCount: episodes.length,
+          itemBuilder: (context, index) {
+            final selected = index == _episodeIndex;
+            return OutlinedButton(
+              onPressed: () => _selectEpisode(index),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: selected
+                    ? colors.primaryContainer
+                    : AppColors.surfaceRaised,
+                foregroundColor: selected
+                    ? colors.onPrimaryContainer
+                    : colors.onSurface,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+              ),
+              child: Text(
+                episodes[index].name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 }
