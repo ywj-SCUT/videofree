@@ -94,7 +94,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       var url = _current.url;
       Map<String, String>? headers = _current.headers;
-      if (url.startsWith('videoget-rule:')) {
+      if (url.startsWith('videoget-rule:') ||
+          url.startsWith('videoget-short:')) {
         final resolved = await widget.appState.engine.play(
           _current.sourceId ?? widget.item.sourceId,
           url,

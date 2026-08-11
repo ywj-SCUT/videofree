@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../models/models.dart';
 import 'net_service.dart';
+import 'short_video_engine.dart';
 import 'spider_engine.dart';
 
 class TvBoxImport {
@@ -11,12 +12,17 @@ class TvBoxImport {
 }
 
 class SourceEngine {
-  SourceEngine({NetService? net, SpiderRuleExecutor? spider})
-    : _net = net ?? NetService(),
-      _spider = spider ?? FlutterJsSpiderEngine(net: net);
+  SourceEngine({
+    NetService? net,
+    SpiderRuleExecutor? spider,
+    ShortVideoEngine? shorts,
+  }) : _net = net ?? NetService(),
+       _spider = spider ?? FlutterJsSpiderEngine(net: net),
+       _shorts = shorts ?? ShortVideoEngine(net: net);
 
   final NetService _net;
   final SpiderRuleExecutor _spider;
+  final ShortVideoEngine _shorts;
 
   static const _requestHeaders = <String, String>{
     'User-Agent':
@@ -202,14 +208,29 @@ class SourceEngine {
         .toList();
   }
 
-  Future<List<MediaItem>> searchCms(CmsSource source, String query) async {
+  Future<SourceSearchPage> searchCms(
+    CmsSource source,
+    String query, [
+    int page = 1,
+  ]) async {
     final api = source.api;
-    if (api == null || api.isEmpty) return [];
+    if (api == null || api.isEmpty) {
+      return const SourceSearchPage(items: [], hasMore: false);
+    }
     final data = await _fetchCmsJson(
-      _cmsUrl(api, {'ac': 'videolist', 'wd': query}),
+      _cmsUrl(api, {'ac': 'videolist', 'wd': query, 'pg': '$page'}),
       source,
     );
-    return _vodList(data).map((item) => normalizeVod(item, source)).toList();
+    final map = _map(data);
+    final items = _vodList(
+      data,
+    ).map((item) => normalizeVod(item, source)).toList();
+    final currentPage = _number(map['page'], fallback: page);
+    final pageCount = _number(map['pagecount'], fallback: 0);
+    return SourceSearchPage(
+      items: items,
+      hasMore: pageCount > 0 ? currentPage < pageCount : items.isNotEmpty,
+    );
   }
 
   Future<MediaItem?> detailCms(CmsSource source, String id) async {
@@ -226,27 +247,50 @@ class SourceEngine {
   Future<SearchResponse> aggregateSearch(
     List<CmsSource> sources,
     String query,
-    MediaCategory category,
-  ) async {
+    MediaCategory category, [
+    int page = 1,
+  ]) async {
+    final currentPage = page < 1 ? 1 : page;
     final stopwatch = Stopwatch()..start();
     final active = sources
-        .where((source) => source.enabled && source.searchable)
+        .where(
+          (source) =>
+              source.enabled &&
+              source.searchable &&
+              (source.type != 'short-api' || category == MediaCategory.short),
+        )
         .toList();
     final attempts = await Future.wait(
       active.map((source) async {
         try {
           if (source.type == 'spider') {
-            final raw = await _spider.search(source, query);
+            final raw = await _spider.search(source, query, currentPage);
             final values = raw is List ? raw : _rawList(_map(raw)['items']);
             final items = values
                 .map((value) => normalizeSpiderItem(value, source))
                 .whereType<MediaItem>()
                 .toList();
-            return _SearchAttempt(source: source, items: items);
+            return _SearchAttempt(
+              source: source,
+              items: items,
+              hasMore: raw is Map
+                  ? _map(raw)['hasMore'] == true
+                  : items.isNotEmpty,
+            );
           }
+          if (source.type == 'short-api') {
+            final result = await _shorts.search(source, query, currentPage);
+            return _SearchAttempt(
+              source: source,
+              items: result.items,
+              hasMore: result.hasMore,
+            );
+          }
+          final result = await searchCms(source, query, currentPage);
           return _SearchAttempt(
             source: source,
-            items: await searchCms(source, query),
+            items: result.items,
+            hasMore: result.hasMore,
           );
         } catch (error) {
           return _SearchAttempt(source: source, error: _errorText(error));
@@ -273,6 +317,8 @@ class SourceEngine {
       items: mergeMediaVariants(remote.toList()),
       failures: failures,
       elapsedMs: stopwatch.elapsedMilliseconds,
+      page: currentPage,
+      hasMore: attempts.any((attempt) => attempt.hasMore),
     );
   }
 
@@ -321,6 +367,7 @@ class SourceEngine {
   ) async {
     final source = sources.where((entry) => entry.id == sourceId).firstOrNull;
     if (source == null) return null;
+    if (source.type == 'short-api') return null;
     if (source.type == 'spider') {
       final raw = await _spider.detail(source, id);
       return normalizeSpiderItem(raw, source, includePlayback: true);
@@ -388,6 +435,9 @@ class SourceEngine {
   ) async {
     if (_isHttp(token)) return PlaybackResolution(url: token);
     final source = sources.where((entry) => entry.id == sourceId).firstOrNull;
+    if (source?.type == 'short-api' && token.startsWith('videoget-short:')) {
+      return _shorts.resolvePlayback(source!, token);
+    }
     if (source?.type != 'spider' || !token.startsWith('videoget-rule:')) {
       throw Exception('没有找到剧集对应的规则源');
     }
@@ -593,11 +643,13 @@ class SourceEngine {
 class _SearchAttempt {
   final CmsSource source;
   final List<MediaItem> items;
+  final bool hasMore;
   final String? error;
 
   const _SearchAttempt({
     required this.source,
     this.items = const [],
+    this.hasMore = false,
     this.error,
   });
 }

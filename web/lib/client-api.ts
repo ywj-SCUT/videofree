@@ -8,6 +8,9 @@ import type {
 const SETTINGS_KEY = 'videoget.settings.v1';
 const LIBRARY_KEY = 'videoget.library.v1';
 const defaultSources: CmsSource[] = [
+  { id: 'builtin-short-tiktok', name: 'TikTok 公共推荐', type: 'short-api', api: 'https://www.tikwm.com', provider: 'tikwm', region: 'US', enabled: true, searchable: true },
+  { id: 'builtin-short-douyin', name: '抖音推荐', type: 'short-api', api: 'https://api.tikhub.io', provider: 'tikhub-douyin', region: 'CN', enabled: false, searchable: true },
+  { id: 'builtin-short-youtube', name: 'YouTube Shorts', type: 'short-api', api: 'https://api.tikhub.io', provider: 'tikhub-youtube', region: 'CN', enabled: false, searchable: true },
   { id: 'builtin-line-a', name: '默认线路 A', type: 'cms', api: 'https://caiji.moduapi.cc/api.php/provide/vod/', enabled: true, searchable: true },
   { id: 'builtin-line-b', name: '默认线路 B', type: 'cms', api: 'https://jszyapi.com/api.php/provide/vod/', enabled: true, searchable: true },
 ];
@@ -32,8 +35,13 @@ function readValue<T>(key: string, fallback: T): T {
 
 function settings(): AppSettings {
   const value = readValue(SETTINGS_KEY, defaultSettings);
+  const persisted = new Map((value.sources ?? []).map((source) => [source.id, source]));
+  const managed = defaultSources
+    .filter((source) => source.id.startsWith('builtin-'))
+    .map((source) => ({ ...source, ...persisted.get(source.id) }));
+  const custom = (value.sources ?? []).filter((source) => !source.id.startsWith('builtin-'));
   return {
-    sources: value.sources?.length ? value.sources : structuredClone(defaultSources),
+    sources: [...managed, ...custom],
     danmakuProviders: value.danmakuProviders ?? structuredClone(defaultSettings.danmakuProviders),
     adFiltering: value.adFiltering ?? true,
     qualityPreference: value.qualityPreference ?? 'highest',
@@ -74,8 +82,8 @@ function mergeImported(current: AppSettings, imported: { sources: CmsSource[]; f
 export function installWebApi(): void {
   if (typeof window === 'undefined' || window.lumen) return;
   const api: LumenApi = {
-    search(query: string, category: MediaCategory) {
-      return request<SearchResponse>('/api/search', { query, category, sources: settings().sources });
+    search(query: string, category: MediaCategory, page = 1) {
+      return request<SearchResponse>('/api/search', { query, category, page, sources: settings().sources });
     },
     detail(sourceId: string, id: string) {
       return request<MediaItem | null>('/api/detail', { sourceId, id, sources: settings().sources });

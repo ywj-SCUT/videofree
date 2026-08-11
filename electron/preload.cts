@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { AppSettings, CmsSource, DanmakuProvider, LibraryState, MediaCategory } from './types.js';
 
 const api = {
-  search: (query: string, category: MediaCategory) => ipcRenderer.invoke('media:search', query, category),
+  search: (query: string, category: MediaCategory, page = 1) => ipcRenderer.invoke('media:search', query, category, page),
   detail: (sourceId: string, id: string) => ipcRenderer.invoke('media:detail', sourceId, id),
   resolve: (item: unknown) => ipcRenderer.invoke('media:resolve', item),
   play: (sourceId: string, token: string) => ipcRenderer.invoke('media:play', sourceId, token),

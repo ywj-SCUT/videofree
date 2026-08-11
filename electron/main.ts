@@ -99,9 +99,9 @@ function registerIpc(): void {
     return applyImportedContent(content);
   });
   ipcMain.handle('settings:test-source', (_event, source: CmsSource) => testSource(source));
-  ipcMain.handle('media:search', async (_event, query: string, category: MediaCategory) => {
+  ipcMain.handle('media:search', async (_event, query: string, category: MediaCategory, page = 1) => {
     const settings = storage.getSettings(proxy?.port ?? 0);
-    return aggregateSearch(settings.sources, query, category);
+    return aggregateSearch(settings.sources, query, category, page);
   });
   ipcMain.handle('media:detail', async (_event, sourceId: string, id: string) => {
     const settings = storage.getSettings(proxy?.port ?? 0);

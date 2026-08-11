@@ -17,6 +17,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _importUrl = TextEditingController();
+  final _tikHubToken = TextEditingController();
   bool _importing = false;
 
   @override
@@ -33,7 +34,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     widget.appState.removeListener(_refresh);
     _importUrl.dispose();
+    _tikHubToken.dispose();
     super.dispose();
+  }
+
+  bool get _tikHubConfigured => widget.appState.sources.any(
+    (source) =>
+        source.provider?.startsWith('tikhub-') == true &&
+        RegExp(
+          r'^Bearer\s+\S+',
+          caseSensitive: false,
+        ).hasMatch(source.headers?['Authorization'] ?? ''),
+  );
+
+  Future<void> _saveTikHub() async {
+    final token = _tikHubToken.text.trim();
+    if (token.isEmpty) return;
+    final next = widget.appState.sources.map((source) {
+      if (source.provider?.startsWith('tikhub-') != true) return source;
+      return CmsSource(
+        id: source.id,
+        name: source.name,
+        type: source.type,
+        api: source.api,
+        enabled: true,
+        searchable: source.searchable,
+        headers: {...?source.headers, 'Authorization': 'Bearer $token'},
+        script: source.script,
+        scriptUrl: source.scriptUrl,
+        ruleConfig: source.ruleConfig,
+        provider: source.provider,
+        region: source.region,
+      );
+    }).toList();
+    await widget.appState.updateSources(next);
+    _tikHubToken.clear();
+    _message('抖音与 YouTube Shorts 平台接口已启用');
   }
 
   Future<void> _applyImport(ImportResult result) async {
@@ -210,6 +246,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 24),
           SectionHeading(
+            title: '短视频平台 API',
+            detail: _tikHubConfigured
+                ? 'TikHub 已配置，TikTok、抖音与 YouTube Shorts 可参与推荐'
+                : 'TikTok 公共推荐默认启用，配置 TikHub 后接入抖音与 YouTube Shorts',
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _tikHubToken,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: InputDecoration(
+                    hintText: _tikHubConfigured
+                        ? '输入新 Token 进行更新'
+                        : 'TikHub Bearer Token',
+                    prefixIcon: const Icon(Icons.key_rounded),
+                  ),
+                  onSubmitted: (_) => _saveTikHub(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                tooltip: '保存并启用',
+                onPressed: _saveTikHub,
+                icon: const Icon(Icons.check_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          SectionHeading(
             title: '视频源',
             detail: '${widget.appState.sources.length} 个来源，开关控制是否参与搜索',
             trailing: IconButton(
@@ -237,13 +306,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               script: item.script,
                               scriptUrl: item.scriptUrl,
                               ruleConfig: item.ruleConfig,
+                              provider: item.provider,
+                              region: item.region,
                             )
                           : item,
                     )
                     .toList();
                 widget.appState.updateSources(next);
               },
-              onDelete: () => _removeSource(source),
+              onDelete: source.id.startsWith('builtin-')
+                  ? null
+                  : () => _removeSource(source),
             ),
           ),
           const SizedBox(height: 28),
@@ -320,7 +393,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 class _SourceRow extends StatelessWidget {
   final CmsSource source;
   final ValueChanged<bool> onToggle;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
 
   const _SourceRow({
     required this.source,
@@ -355,7 +428,11 @@ class _SourceRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    source.type == 'spider' ? 'Spider 规则源' : (source.api ?? ''),
+                    source.type == 'spider'
+                        ? 'Spider 规则源'
+                        : source.type == 'short-api'
+                        ? '平台接口 · ${source.provider}'
+                        : (source.api ?? ''),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -367,11 +444,12 @@ class _SourceRow extends StatelessWidget {
               ),
             ),
             Switch(value: source.enabled, onChanged: onToggle),
-            IconButton(
-              tooltip: '移除来源',
-              onPressed: onDelete,
-              icon: const Icon(Icons.delete_outline_rounded),
-            ),
+            if (onDelete != null)
+              IconButton(
+                tooltip: '移除来源',
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline_rounded),
+              ),
           ],
         ),
       ),

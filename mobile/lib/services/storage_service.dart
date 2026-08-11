@@ -11,6 +11,36 @@ class StorageService {
 
   static const _defaultSources = [
     {
+      'id': 'builtin-short-tiktok',
+      'name': 'TikTok 公共推荐',
+      'type': 'short-api',
+      'api': 'https://www.tikwm.com',
+      'provider': 'tikwm',
+      'region': 'US',
+      'enabled': true,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-short-douyin',
+      'name': '抖音推荐',
+      'type': 'short-api',
+      'api': 'https://api.tikhub.io',
+      'provider': 'tikhub-douyin',
+      'region': 'CN',
+      'enabled': false,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-short-youtube',
+      'name': 'YouTube Shorts',
+      'type': 'short-api',
+      'api': 'https://api.tikhub.io',
+      'provider': 'tikhub-youtube',
+      'region': 'CN',
+      'enabled': false,
+      'searchable': true,
+    },
+    {
       'id': 'builtin-line-a',
       'name': '默认线路 A',
       'type': 'cms',
@@ -35,12 +65,19 @@ class StorageService {
       return _defaultSources.map((s) => CmsSource.fromJson(s)).toList();
     }
     final list = jsonDecode(raw) as List<dynamic>;
-    final sources = list
+    final persisted = list
         .map((s) => CmsSource.fromJson(s as Map<String, dynamic>))
         .toList();
-    return sources.isEmpty
-        ? _defaultSources.map((s) => CmsSource.fromJson(s)).toList()
-        : sources;
+    final byId = {for (final source in persisted) source.id: source.toJson()};
+    final managed = _defaultSources
+        .map(
+          (source) => CmsSource.fromJson({...source, ...?byId[source['id']]}),
+        )
+        .toList();
+    final custom = persisted
+        .where((source) => !source.id.startsWith('builtin-'))
+        .toList();
+    return [...managed, ...custom];
   }
 
   Future<void> saveSources(List<CmsSource> sources) async {

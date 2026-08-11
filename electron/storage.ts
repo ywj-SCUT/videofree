@@ -31,12 +31,14 @@ export class Storage {
       const raw = await readFile(this.file, 'utf8');
       const parsed = JSON.parse(raw) as Partial<PersistedData>;
       const persistedSources = parsed.settings?.sources ?? [];
-      const hasManagedDefaults = persistedSources.some((source) => source.id.startsWith('builtin-line-'));
       const enabledById = new Map(persistedSources.map((source) => [source.id, source.enabled]));
-      const customSources = persistedSources.filter((source) => !source.id.startsWith('builtin-line-'));
-      const managedSources = hasManagedDefaults
-        ? DEFAULT_SOURCES.map((source) => ({ ...source, enabled: enabledById.get(source.id) ?? source.enabled }))
-        : [];
+      const persistedById = new Map(persistedSources.map((source) => [source.id, source]));
+      const customSources = persistedSources.filter((source) => !source.id.startsWith('builtin-'));
+      const managedSources = DEFAULT_SOURCES.map((source) => ({
+        ...source,
+        ...persistedById.get(source.id),
+        enabled: enabledById.get(source.id) ?? source.enabled,
+      }));
       const sources = persistedSources.length
         ? [...managedSources, ...customSources]
         : structuredClone(DEFAULT_SOURCES);

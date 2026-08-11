@@ -10,9 +10,10 @@ export interface MediaItem {
   alternatives?: MediaVariant[];
 }
 export interface CmsSource {
-  id: string; name: string; type: 'cms' | 'spider'; api?: string; enabled: boolean;
+  id: string; name: string; type: 'cms' | 'spider' | 'short-api'; api?: string; enabled: boolean;
   searchable: boolean; categories?: string[]; headers?: Record<string, string>; script?: string;
   scriptUrl?: string; ruleConfig?: Record<string, unknown>;
+  provider?: 'tikwm' | 'tikhub-douyin' | 'tikhub-tiktok' | 'tikhub-youtube'; region?: string;
 }
 export interface PlaybackResolution { url: string; headers?: Record<string, string> }
 export interface DanmakuProvider {
@@ -25,7 +26,13 @@ export interface DanmakuResponse {
   failures: Array<{ providerId: string; providerName: string; message: string }>; elapsedMs: number;
 }
 export interface ImportResult { importedSources: number; failures: string[]; settings: AppSettings }
-export interface SearchResponse { items: MediaItem[]; failures: Array<{ sourceId: string; sourceName: string; message: string }>; elapsedMs: number }
+export interface SearchResponse {
+  items: MediaItem[];
+  failures: Array<{ sourceId: string; sourceName: string; message: string }>;
+  elapsedMs: number;
+  page: number;
+  hasMore: boolean;
+}
 export interface HistoryItem extends MediaItem {
   lineName?: string; episodeName?: string; progress: number; duration: number; watchedAt: number;
 }
@@ -38,7 +45,7 @@ export interface AppSettings {
   qualityPreference: 'auto' | 'highest' | '1080p' | '720p'; proxyPort: number; proxyBaseUrl?: string;
 }
 export interface LumenApi {
-  search(query: string, category: MediaCategory): Promise<SearchResponse>;
+  search(query: string, category: MediaCategory, page?: number): Promise<SearchResponse>;
   detail(sourceId: string, id: string): Promise<MediaItem | null>;
   resolve(item: MediaItem): Promise<MediaItem | null>;
   play(sourceId: string, token: string): Promise<PlaybackResolution>;

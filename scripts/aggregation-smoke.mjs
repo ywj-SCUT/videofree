@@ -5,8 +5,8 @@ const categoryCases = [
   ['动作电影', 'movie'],
   ['国产剧', 'series'],
   ['日韩动漫', 'anime'],
-  ['女频恋爱短剧', 'short'],
-  ['AIGC AI短剧', 'ai-short'],
+  ['女频恋爱短视频', 'short'],
+  ['AIGC AI 短视频', 'ai-short'],
 ];
 for (const [input, expected] of categoryCases) {
   const actual = inferMediaCategory(input);
@@ -26,7 +26,7 @@ const missingEpisodeSource = (resolved.playLines ?? []).some((line) =>
 if (missingEpisodeSource) throw new Error('跨来源线路存在缺失来源 ID 的剧集');
 
 const aiShorts = await aggregateSearch([], '', 'ai-short');
-if (!aiShorts.items.some((item) => item.category === 'ai-short')) throw new Error('AI 短剧分类没有可展示内容');
+if (!aiShorts.items.some((item) => item.category === 'ai-short')) throw new Error('AI 短视频分类没有可展示内容');
 
 console.log(JSON.stringify({
   query: '哪吒',

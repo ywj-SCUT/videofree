@@ -1,6 +1,7 @@
 import { fetchRemoteText } from './net-client.js';
 import { OPEN_CATALOG } from './open-catalog.js';
 import { detailRule, resolveRulePlayback, searchRule, testRule } from './rule-engine.js';
+import { resolveShortPlayback, searchShortSource, testShortSource } from './short-video-engine.js';
 import type { CmsSource, MediaCategory, MediaItem, MediaVariant, PlaybackResolution, PlayLine, SearchResponse } from './types.js';
 
 const requestHeaders = {
@@ -79,11 +80,27 @@ function cmsUrl(api: string, params: Record<string, string>): string {
   return url.toString();
 }
 
-async function searchCms(source: CmsSource, query: string): Promise<MediaItem[]> {
-  if (!source.api) return [];
-  const url = cmsUrl(source.api, { ac: 'videolist', wd: query });
-  const data = await fetchJson(url, source) as { list?: Array<Record<string, unknown>>; data?: Array<Record<string, unknown>> };
-  return (data.list ?? data.data ?? []).map((item) => normalizeVod(item, source));
+interface SourceSearchPage {
+  items: MediaItem[];
+  hasMore: boolean;
+}
+
+async function searchCms(source: CmsSource, query: string, page: number): Promise<SourceSearchPage> {
+  if (!source.api) return { items: [], hasMore: false };
+  const url = cmsUrl(source.api, { ac: 'videolist', wd: query, pg: String(page) });
+  const data = await fetchJson(url, source) as {
+    list?: Array<Record<string, unknown>>;
+    data?: Array<Record<string, unknown>>;
+    page?: number | string;
+    pagecount?: number | string;
+  };
+  const items = (data.list ?? data.data ?? []).map((item) => normalizeVod(item, source));
+  const currentPage = Number(data.page ?? page);
+  const pageCount = Number(data.pagecount ?? 0);
+  return {
+    items,
+    hasMore: Number.isFinite(pageCount) && pageCount > 0 ? currentPage < pageCount : items.length > 0,
+  };
 }
 
 async function detailCms(source: CmsSource, id: string): Promise<MediaItem | null> {
@@ -94,26 +111,35 @@ async function detailCms(source: CmsSource, id: string): Promise<MediaItem | nul
   return item ? normalizeVod(item, source) : null;
 }
 
-export async function aggregateSearch(sources: CmsSource[], query: string, category: MediaCategory): Promise<SearchResponse> {
+export async function aggregateSearch(sources: CmsSource[], query: string, category: MediaCategory, page = 1): Promise<SearchResponse> {
   const started = Date.now();
+  const currentPage = Math.max(1, Math.floor(Number(page)) || 1);
   const normalizedQuery = query.trim().toLowerCase();
-  const local = OPEN_CATALOG.filter((item) => {
+  const local = currentPage === 1 ? OPEN_CATALOG.filter((item) => {
     const matchesQuery = !normalizedQuery || `${item.title} ${item.summary ?? ''}`.toLowerCase().includes(normalizedQuery);
     return matchesQuery && (category === 'all' || item.category === category);
-  });
-  const active = sources.filter((source) => source.enabled && source.searchable);
-  const settled = await Promise.allSettled(active.map((source) => source.type === 'cms'
-    ? searchCms(source, query)
-    : searchRule(source, query)));
+  }) : [];
+  const active = sources.filter((source) => source.enabled && source.searchable
+    && (source.type !== 'short-api' || category === 'short'));
+  const settled = await Promise.allSettled(active.map(async (source): Promise<SourceSearchPage> => {
+    if (source.type === 'cms') return searchCms(source, query, currentPage);
+    if (source.type === 'short-api') return searchShortSource(source, query, currentPage);
+    const items = await searchRule(source, query, currentPage);
+    return { items, hasMore: items.length > 0 };
+  }));
   const failures: SearchResponse['failures'] = [];
   const remote: MediaItem[] = [];
+  let hasMore = false;
   settled.forEach((result, index) => {
-    if (result.status === 'fulfilled') remote.push(...result.value);
+    if (result.status === 'fulfilled') {
+      remote.push(...result.value.items);
+      hasMore ||= result.value.hasMore;
+    }
     else failures.push({ sourceId: active[index].id, sourceName: active[index].name, message: result.reason instanceof Error ? result.reason.message : String(result.reason) });
   });
   const items = mergeMediaVariants([...local, ...remote]
     .filter((item) => category === 'all' || item.category === category));
-  return { items, failures, elapsedMs: Date.now() - started };
+  return { items, failures, elapsedMs: Date.now() - started, page: currentPage, hasMore };
 }
 
 function canonicalTitle(title: string): string {
@@ -165,12 +191,15 @@ export async function getDetail(sources: CmsSource[], sourceId: string, id: stri
   if (local) return local;
   const source = sources.find((entry) => entry.id === sourceId);
   if (!source) return null;
+  if (source.type === 'short-api') return null;
   if (source.type === 'spider') return detailRule(source, id);
   return detailCms(source, id);
 }
 
 export async function resolvePlayback(sources: CmsSource[], sourceId: string, token: string): Promise<PlaybackResolution> {
   if (/^https?:\/\//i.test(token)) return { url: token };
+  const shortSource = sources.find((entry) => entry.id === sourceId && entry.type === 'short-api');
+  if (shortSource && token.startsWith('videoget-short:')) return resolveShortPlayback(shortSource, token);
   const source = sources.find((entry) => entry.id === sourceId && entry.type === 'spider');
   if (!source) throw new Error('没有找到剧集对应的规则源');
   return resolveRulePlayback(source, token);
@@ -209,7 +238,8 @@ export async function resolveMedia(sources: CmsSource[], item: MediaItem): Promi
 export async function testSource(source: CmsSource): Promise<{ ok: boolean; latencyMs: number; message: string }> {
   const started = Date.now();
   try {
-    if (source.type === 'cms') await searchCms(source, '测试');
+    if (source.type === 'cms') await searchCms(source, '测试', 1);
+    else if (source.type === 'short-api') await testShortSource(source);
     else await testRule(source);
     return { ok: true, latencyMs: Date.now() - started, message: '连接正常' };
   } catch (error) {

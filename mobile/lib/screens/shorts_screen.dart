@@ -64,6 +64,12 @@ const _openShorts = <MediaItem>[
   ),
 ];
 
+class _ResolvedShort {
+  final String url;
+  final Map<String, String>? headers;
+  const _ResolvedShort({required this.url, this.headers});
+}
+
 class ShortsScreen extends StatefulWidget {
   final AppState appState;
 
@@ -88,7 +94,12 @@ class _ShortsScreenState extends State<ShortsScreen>
   bool _playing = false;
   bool _buffering = true;
   bool _refreshing = false;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  int _page = 1;
   String? _error;
+  final Map<String, _ResolvedShort> _resolved = {};
+  final Map<String, Future<_ResolvedShort>> _resolving = {};
 
   @override
   void initState() {
@@ -135,25 +146,124 @@ class _ShortsScreenState extends State<ShortsScreen>
           '',
           MediaCategory.short,
           widget.appState.sources,
+          1,
         ),
         widget.appState.engine.search(
           '',
           MediaCategory.aiShort,
           widget.appState.sources,
+          1,
         ),
       ]);
       if (!mounted) return;
-      final byId = <String, MediaItem>{
-        for (final item in _openShorts) '${item.sourceId}:${item.id}': item,
-      };
+      final byId = <String, MediaItem>{};
       for (final item in responses.expand((response) => response.items)) {
         byId['${item.sourceId}:${item.id}'] = item;
       }
-      setState(() => _items = byId.values.toList());
+      for (final item in _openShorts) {
+        byId.putIfAbsent('${item.sourceId}:${item.id}', () => item);
+      }
+      _resolved.clear();
+      _resolving.clear();
+      setState(() {
+        _items = byId.values.toList();
+        _page = 1;
+        _hasMore = responses.any((response) => response.hasMore);
+        _currentIndex = 0;
+      });
+      if (_pageController.hasClients) _pageController.jumpToPage(0);
+      await _activate(0);
       _precacheNeighbors(_currentIndex);
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+    setState(() => _loadingMore = true);
+    var nextPage = _page;
+    var hasMore = _hasMore;
+    final fresh = <MediaItem>[];
+    final known = _items.map((item) => '${item.sourceId}:${item.id}').toSet();
+    try {
+      for (
+        var attempt = 0;
+        attempt < 4 && hasMore && fresh.isEmpty;
+        attempt++
+      ) {
+        nextPage++;
+        final responses = await Future.wait([
+          widget.appState.engine.search(
+            '',
+            MediaCategory.short,
+            widget.appState.sources,
+            nextPage,
+          ),
+          widget.appState.engine.search(
+            '',
+            MediaCategory.aiShort,
+            widget.appState.sources,
+            nextPage,
+          ),
+        ]);
+        hasMore = responses.any((response) => response.hasMore);
+        for (final item in responses.expand((response) => response.items)) {
+          if (known.add('${item.sourceId}:${item.id}')) fresh.add(item);
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _page = nextPage;
+        _hasMore = hasMore;
+        if (fresh.isNotEmpty) _items = [..._items, ...fresh];
+      });
+      _precacheNeighbors(_currentIndex);
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  String _itemKey(MediaItem item) => '${item.sourceId}:${item.id}';
+
+  Future<_ResolvedShort> _resolveShort(MediaItem original) {
+    final key = _itemKey(original);
+    final cached = _resolved[key];
+    if (cached != null) return Future.value(cached);
+    return _resolving
+        .putIfAbsent(key, () async {
+          var item = original;
+          var lines = item.playLines ?? const <PlayLine>[];
+          if (lines.isEmpty) {
+            final detail = await widget.appState.engine.resolve(
+              item,
+              widget.appState.sources,
+            );
+            if (detail != null) {
+              item = detail;
+              lines = detail.playLines ?? const <PlayLine>[];
+            }
+          }
+          final episodes = lines.expand((line) => line.episodes);
+          if (episodes.isEmpty) throw Exception('该短视频暂无可用播放地址');
+          final episode = episodes.first;
+          var url = episode.url;
+          var headers = episode.headers;
+          if (url.startsWith('videoget-rule:') ||
+              url.startsWith('videoget-short:')) {
+            final resolved = await widget.appState.engine.play(
+              episode.sourceId ?? item.sourceId,
+              url,
+              widget.appState.sources,
+            );
+            url = resolved.url;
+            headers = resolved.headers;
+          }
+          final result = _ResolvedShort(url: url, headers: headers);
+          _resolved[key] = result;
+          return result;
+        })
+        .whenComplete(() => _resolving.remove(key));
   }
 
   Future<void> _activate(int index) async {
@@ -166,34 +276,12 @@ class _ShortsScreenState extends State<ShortsScreen>
     });
     await _player.stop();
     try {
-      var item = _items[index];
-      var lines = item.playLines ?? const <PlayLine>[];
-      if (lines.isEmpty) {
-        final detail = await widget.appState.engine.resolve(
-          item,
-          widget.appState.sources,
-        );
-        if (detail != null) {
-          item = detail;
-          lines = detail.playLines ?? const <PlayLine>[];
-        }
-      }
-      final episodes = lines.expand((line) => line.episodes);
-      if (episodes.isEmpty) throw Exception('该短视频暂无可用播放地址');
-      final episode = episodes.first;
-      var url = episode.url;
-      var headers = episode.headers;
-      if (url.startsWith('videoget-rule:')) {
-        final resolved = await widget.appState.engine.play(
-          episode.sourceId ?? item.sourceId,
-          url,
-          widget.appState.sources,
-        );
-        url = resolved.url;
-        headers = resolved.headers;
-      }
+      final playback = await _resolveShort(_items[index]);
       if (!mounted || requestId != _requestId) return;
-      await _player.open(Media(url, httpHeaders: headers), play: true);
+      await _player.open(
+        Media(playback.url, httpHeaders: playback.headers),
+        play: true,
+      );
     } catch (error) {
       if (!mounted || requestId != _requestId) return;
       setState(() {
@@ -202,6 +290,22 @@ class _ShortsScreenState extends State<ShortsScreen>
       });
     }
     _precacheNeighbors(index);
+    unawaited(_preloadNext(index));
+  }
+
+  Future<void> _preloadNext(int index) async {
+    final next = index + 1;
+    if (next >= _items.length) return;
+    try {
+      await _resolveShort(_items[next]);
+    } catch (_) {
+      // 当前播放不应被下一条预加载失败打断。
+    }
+    final keep = <String>{
+      for (final value in [index - 1, index, index + 1, index + 2])
+        if (value >= 0 && value < _items.length) _itemKey(_items[value]),
+    };
+    _resolved.removeWhere((key, _) => !keep.contains(key));
   }
 
   void _precacheNeighbors(int index) {
@@ -260,11 +364,11 @@ class _ShortsScreenState extends State<ShortsScreen>
             onPageChanged: (index) {
               HapticFeedback.selectionClick();
               unawaited(_activate(index));
+              if (index >= _items.length - 3) unawaited(_loadMore());
             },
             itemBuilder: (context, index) => _ShortPage(
               item: _items[index],
               index: index,
-              total: _items.length,
               active: index == _currentIndex,
               player: _videoController,
               playing: _playing,
@@ -279,6 +383,34 @@ class _ShortsScreenState extends State<ShortsScreen>
               onDetail: () => _openDetail(_items[index]),
             ),
           ),
+          if (_loadingMore)
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 18,
+              child: Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Color(0xCC101519),
+                    borderRadius: BorderRadius.all(Radius.circular(8)),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 8),
+                        Text('正在载入'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           SafeArea(
             bottom: false,
             child: Padding(
@@ -313,7 +445,6 @@ class _ShortsScreenState extends State<ShortsScreen>
 class _ShortPage extends StatelessWidget {
   final MediaItem item;
   final int index;
-  final int total;
   final bool active;
   final VideoController player;
   final bool playing;
@@ -327,7 +458,6 @@ class _ShortPage extends StatelessWidget {
   const _ShortPage({
     required this.item,
     required this.index,
-    required this.total,
     required this.active,
     required this.player,
     required this.playing,
@@ -379,7 +509,7 @@ class _ShortPage extends StatelessWidget {
           top: MediaQuery.paddingOf(context).top + 62,
           right: 16,
           child: Text(
-            '${index + 1} / $total',
+            '第 ${index + 1} 条',
             style: const TextStyle(
               color: Color(0xCCFFFFFF),
               fontSize: 12,

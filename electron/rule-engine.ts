@@ -162,8 +162,8 @@ async function runRule(source: CmsSource, operation: RuleOperation, input: unkno
   });
 }
 
-export async function searchRule(source: CmsSource, query: string): Promise<MediaItem[]> {
-  const raw = await runRule(source, 'search', { query, page: 1 });
+export async function searchRule(source: CmsSource, query: string, page = 1): Promise<MediaItem[]> {
+  const raw = await runRule(source, 'search', { query, page });
   const values = Array.isArray(raw) ? raw : Array.isArray(asRecord(raw).items) ? asRecord(raw).items as unknown[] : [];
   return values.map((value) => normalizeItem(value, source, false)).filter((value): value is MediaItem => Boolean(value));
 }

@@ -15,8 +15,9 @@ class LocalEngine implements VideoEngine {
   Future<SearchResponse> search(
     String query,
     MediaCategory category,
-    List<CmsSource> sources,
-  ) => _sourceEngine.aggregateSearch(sources, query, category);
+    List<CmsSource> sources, [
+    int page = 1,
+  ]) => _sourceEngine.aggregateSearch(sources, query, category, page);
 
   @override
   Future<MediaItem?> detail(

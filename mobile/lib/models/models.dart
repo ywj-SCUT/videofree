@@ -204,16 +204,25 @@ class SourceFailure {
     sourceName: json['sourceName'] as String? ?? '',
     message: json['message'] as String? ?? '',
   );
+  Map<String, dynamic> toJson() => {
+    'sourceId': sourceId,
+    'sourceName': sourceName,
+    'message': message,
+  };
 }
 
 class SearchResponse {
   final List<MediaItem> items;
   final List<SourceFailure> failures;
   final int elapsedMs;
+  final int page;
+  final bool hasMore;
   const SearchResponse({
     required this.items,
     required this.failures,
     required this.elapsedMs,
+    this.page = 1,
+    this.hasMore = false,
   });
   factory SearchResponse.fromJson(Map<String, dynamic> json) => SearchResponse(
     items: (json['items'] as List<dynamic>? ?? [])
@@ -223,7 +232,16 @@ class SearchResponse {
         .map((e) => SourceFailure.fromJson(e as Map<String, dynamic>))
         .toList(),
     elapsedMs: json['elapsedMs'] as int? ?? 0,
+    page: json['page'] as int? ?? 1,
+    hasMore: json['hasMore'] as bool? ?? false,
   );
+  Map<String, dynamic> toJson() => {
+    'items': items.map((e) => e.toJson()).toList(),
+    'failures': failures.map((e) => e.toJson()).toList(),
+    'elapsedMs': elapsedMs,
+    'page': page,
+    'hasMore': hasMore,
+  };
 }
 
 class PlaybackResolution {
@@ -249,6 +267,8 @@ class CmsSource {
   final String? script;
   final String? scriptUrl;
   final Map<String, dynamic>? ruleConfig;
+  final String? provider;
+  final String? region;
   const CmsSource({
     required this.id,
     required this.name,
@@ -260,6 +280,8 @@ class CmsSource {
     this.script,
     this.scriptUrl,
     this.ruleConfig,
+    this.provider,
+    this.region,
   });
   factory CmsSource.fromJson(Map<String, dynamic> json) => CmsSource(
     id: json['id'] as String? ?? '',
@@ -272,6 +294,8 @@ class CmsSource {
     script: json['script'] as String?,
     scriptUrl: json['scriptUrl'] as String?,
     ruleConfig: json['ruleConfig'] as Map<String, dynamic>?,
+    provider: json['provider'] as String?,
+    region: json['region'] as String?,
   );
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -284,6 +308,8 @@ class CmsSource {
     if (script != null) 'script': script,
     if (scriptUrl != null) 'scriptUrl': scriptUrl,
     if (ruleConfig != null) 'ruleConfig': ruleConfig,
+    if (provider != null) 'provider': provider,
+    if (region != null) 'region': region,
   };
 }
 

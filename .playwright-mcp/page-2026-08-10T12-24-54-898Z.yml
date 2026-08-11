@@ -1,0 +1,407 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e4]:
+    - complementary [ref=e5]:
+      - navigation [ref=e6]:
+        - button "发现" [ref=e7] [cursor=pointer]
+        - button "搜索" [ref=e12] [cursor=pointer]
+        - button "短剧" [ref=e17] [cursor=pointer]
+        - button "直播" [ref=e21] [cursor=pointer]
+        - button "收藏" [ref=e29] [cursor=pointer]
+        - button "观看记录" [ref=e33] [cursor=pointer]
+    - main [ref=e38]:
+      - generic [ref=e39]:
+        - generic [ref=e40]:
+          - generic [ref=e41]:
+            - text: 今晚看什么
+            - heading "发现好内容" [level=1] [ref=e42]
+          - button "搜索电影、剧集、动漫、短剧 Ctrl K" [ref=e43] [cursor=pointer]:
+            - generic [ref=e47]: 搜索电影、剧集、动漫、短剧
+            - generic [ref=e48]: Ctrl K
+        - generic [ref=e50]:
+          - text: 开放影院精选
+          - heading "Big Buck Bunny" [level=2] [ref=e51]
+          - paragraph [ref=e52]: Blender Foundation 制作并以开放许可发布的动画短片。
+          - generic [ref=e53]:
+            - generic [ref=e54]: "2008"
+            - generic [ref=e55]: 1080P
+            - generic [ref=e56]: 开放动画短片
+          - button "立即播放" [ref=e57] [cursor=pointer]
+        - generic [ref=e61]:
+          - heading "最近精选" [level=2] [ref=e62]
+          - paragraph [ref=e63]: 开放内容与已配置来源
+        - generic [ref=e66]:
+          - article [ref=e67]:
+            - button "Big Buck Bunny 1080P 开放影院" [ref=e68] [cursor=pointer]:
+              - img "Big Buck Bunny" [ref=e69]
+              - generic [ref=e74]: 1080P
+              - generic [ref=e75]: 开放影院
+            - generic [ref=e76]:
+              - button "Big Buck Bunny 2008 · 开放动画短片" [ref=e77] [cursor=pointer]:
+                - strong [ref=e78]: Big Buck Bunny
+                - generic [ref=e79]: 2008 · 开放动画短片
+              - button [ref=e80] [cursor=pointer]
+          - article [ref=e83]:
+            - button "Sintel 1080P 开放影院" [ref=e84] [cursor=pointer]:
+              - img "Sintel" [ref=e85]
+              - generic [ref=e90]: 1080P
+              - generic [ref=e91]: 开放影院
+            - generic [ref=e92]:
+              - button "Sintel 2010 · 开放动画电影" [ref=e93] [cursor=pointer]:
+                - strong [ref=e94]: Sintel
+                - generic [ref=e95]: 2010 · 开放动画电影
+              - button [ref=e96] [cursor=pointer]
+          - article [ref=e99]:
+            - button "Tears of Steel 1080P 开放影院" [ref=e100] [cursor=pointer]:
+              - img "Tears of Steel" [ref=e101]
+              - generic [ref=e106]: 1080P
+              - generic [ref=e107]: 开放影院
+            - generic [ref=e108]:
+              - button "Tears of Steel 2012 · 科幻短片" [ref=e109] [cursor=pointer]:
+                - strong [ref=e110]: Tears of Steel
+                - generic [ref=e111]: 2012 · 科幻短片
+              - button [ref=e112] [cursor=pointer]
+          - article [ref=e115]:
+            - button "Elephants Dream 1080P 开放影院" [ref=e116] [cursor=pointer]:
+              - img "Elephants Dream" [ref=e117]
+              - generic [ref=e122]: 1080P
+              - generic [ref=e123]: 开放影院
+            - generic [ref=e124]:
+              - button "Elephants Dream 2006 · 开放动画电影" [ref=e125] [cursor=pointer]:
+                - strong [ref=e126]: Elephants Dream
+                - generic [ref=e127]: 2006 · 开放动画电影
+              - button [ref=e128] [cursor=pointer]
+          - article [ref=e131]:
+            - button "AI 影像工作流演示 1080P 开放影院" [ref=e132] [cursor=pointer]:
+              - img "AI 影像工作流演示" [ref=e133]
+              - generic [ref=e138]: 1080P
+              - generic [ref=e139]: 开放影院
+            - generic [ref=e140]:
+              - button "AI 影像工作流演示 2025 · AI短剧工作流示例" [ref=e141] [cursor=pointer]:
+                - strong [ref=e142]: AI 影像工作流演示
+                - generic [ref=e143]: 2025 · AI短剧工作流示例
+              - button [ref=e144] [cursor=pointer]
+          - article [ref=e147]:
+            - button "一周星星 默认线路 A" [ref=e148] [cursor=pointer]:
+              - img "一周星星" [ref=e149]
+              - generic [ref=e154]: 默认线路 A
+            - generic [ref=e155]:
+              - button "一周星星 2025 · 更新至35集" [ref=e156] [cursor=pointer]:
+                - strong [ref=e157]: 一周星星
+                - generic [ref=e158]: 2025 · 更新至35集
+              - button [ref=e159] [cursor=pointer]
+          - article [ref=e162]:
+            - button "欢迎回家，宝贝 默认线路 A" [ref=e163] [cursor=pointer]:
+              - img "欢迎回家，宝贝" [ref=e164]
+              - generic [ref=e169]: 默认线路 A
+            - generic [ref=e170]:
+              - button "欢迎回家，宝贝 2025 · 正片" [ref=e171] [cursor=pointer]:
+                - strong [ref=e172]: 欢迎回家，宝贝
+                - generic [ref=e173]: 2025 · 正片
+              - button [ref=e174] [cursor=pointer]
+          - article [ref=e177]:
+            - button "家中低语 默认线路 A" [ref=e178] [cursor=pointer]:
+              - img "家中低语" [ref=e179]
+              - generic [ref=e184]: 默认线路 A
+            - generic [ref=e185]:
+              - button "家中低语 2026 · 正片" [ref=e186] [cursor=pointer]:
+                - strong [ref=e187]: 家中低语
+                - generic [ref=e188]: 2026 · 正片
+              - button [ref=e189] [cursor=pointer]
+          - article [ref=e192]:
+            - button "街头餐厅斗士 默认线路 A" [ref=e193] [cursor=pointer]:
+              - img "街头餐厅斗士" [ref=e194]
+              - generic [ref=e199]: 默认线路 A
+            - generic [ref=e200]:
+              - button "街头餐厅斗士 2026 · 更新至08集" [ref=e201] [cursor=pointer]:
+                - strong [ref=e202]: 街头餐厅斗士
+                - generic [ref=e203]: 2026 · 更新至08集
+              - button [ref=e204] [cursor=pointer]
+          - article [ref=e207]:
+            - button "我的虚构 默认线路 A" [ref=e208] [cursor=pointer]:
+              - img "我的虚构" [ref=e209]
+              - generic [ref=e214]: 默认线路 A
+            - generic [ref=e215]:
+              - button "我的虚构 2026 · 更新至06集" [ref=e216] [cursor=pointer]:
+                - strong [ref=e217]: 我的虚构
+                - generic [ref=e218]: 2026 · 更新至06集
+              - button [ref=e219] [cursor=pointer]
+          - article [ref=e222]:
+            - button "心门之外 默认线路 A" [ref=e223] [cursor=pointer]:
+              - img "心门之外" [ref=e224]
+              - generic [ref=e229]: 默认线路 A
+            - generic [ref=e230]:
+              - button "心门之外 2025 · 正片" [ref=e231] [cursor=pointer]:
+                - strong [ref=e232]: 心门之外
+                - generic [ref=e233]: 2025 · 正片
+              - button [ref=e234] [cursor=pointer]
+          - article [ref=e237]:
+            - button "狂怒追缉 2 个来源" [ref=e238] [cursor=pointer]:
+              - img "狂怒追缉" [ref=e239]
+              - generic [ref=e244]: 2 个来源
+            - generic [ref=e245]:
+              - button "狂怒追缉 2026– · 更新至05集" [ref=e246] [cursor=pointer]:
+                - strong [ref=e247]: 狂怒追缉
+                - generic [ref=e248]: 2026– · 更新至05集
+              - button [ref=e249] [cursor=pointer]
+          - article [ref=e252]:
+            - button "北斗神拳 拳王军杂兵们的挽歌 默认线路 A" [ref=e253] [cursor=pointer]:
+              - img "北斗神拳 拳王军杂兵们的挽歌" [ref=e254]
+              - generic [ref=e259]: 默认线路 A
+            - generic [ref=e260]:
+              - button "北斗神拳 拳王军杂兵们的挽歌 2026 · 更新至06集" [ref=e261] [cursor=pointer]:
+                - strong [ref=e262]: 北斗神拳 拳王军杂兵们的挽歌
+                - generic [ref=e263]: 2026 · 更新至06集
+              - button [ref=e264] [cursor=pointer]
+          - article [ref=e267]:
+            - button "在勿忘草盛开的城镇 ～安昙野诊疗记～ 默认线路 A" [ref=e268] [cursor=pointer]:
+              - img "在勿忘草盛开的城镇 ～安昙野诊疗记～" [ref=e269]
+              - generic [ref=e274]: 默认线路 A
+            - generic [ref=e275]:
+              - button "在勿忘草盛开的城镇 ～安昙野诊疗记～ 2026 · 更新至07集" [ref=e276] [cursor=pointer]:
+                - strong [ref=e277]: 在勿忘草盛开的城镇 ～安昙野诊疗记～
+                - generic [ref=e278]: 2026 · 更新至07集
+              - button [ref=e279] [cursor=pointer]
+          - article [ref=e282]:
+            - button "海外追逃 默认线路 A" [ref=e283] [cursor=pointer]:
+              - img "海外追逃" [ref=e284]
+              - generic [ref=e289]: 默认线路 A
+            - generic [ref=e290]:
+              - button "海外追逃 2026 · 正片" [ref=e291] [cursor=pointer]:
+                - strong [ref=e292]: 海外追逃
+                - generic [ref=e293]: 2026 · 正片
+              - button [ref=e294] [cursor=pointer]
+          - article [ref=e297]:
+            - button "花开锦绣 2 个来源" [ref=e298] [cursor=pointer]:
+              - img "花开锦绣" [ref=e299]
+              - generic [ref=e304]: 2 个来源
+            - generic [ref=e305]:
+              - button "花开锦绣 2026 · 更新至05集" [ref=e306] [cursor=pointer]:
+                - strong [ref=e307]: 花开锦绣
+                - generic [ref=e308]: 2026 · 更新至05集
+              - button [ref=e309] [cursor=pointer]
+          - article [ref=e312]:
+            - button "爸爸当家的聚会·2026 默认线路 A" [ref=e313] [cursor=pointer]:
+              - img "爸爸当家的聚会·2026" [ref=e314]
+              - generic [ref=e319]: 默认线路 A
+            - generic [ref=e320]:
+              - button "爸爸当家的聚会·2026 2026 · 更新至20260810期下" [ref=e321] [cursor=pointer]:
+                - strong [ref=e322]: 爸爸当家的聚会·2026
+                - generic [ref=e323]: 2026 · 更新至20260810期下
+              - button [ref=e324] [cursor=pointer]
+          - article [ref=e327]:
+            - button "时光旅行老爸 默认线路 A" [ref=e328] [cursor=pointer]:
+              - img "时光旅行老爸" [ref=e329]
+              - generic [ref=e334]: 默认线路 A
+            - generic [ref=e335]:
+              - button "时光旅行老爸 2026 · 更新至02集" [ref=e336] [cursor=pointer]:
+                - strong [ref=e337]: 时光旅行老爸
+                - generic [ref=e338]: 2026 · 更新至02集
+              - button [ref=e339] [cursor=pointer]
+          - article [ref=e342]:
+            - button "一次元的扦插 2 个来源" [ref=e343] [cursor=pointer]:
+              - img "一次元的扦插" [ref=e344]
+              - generic [ref=e349]: 2 个来源
+            - generic [ref=e350]:
+              - button "一次元的扦插 2026 · 更新至06集" [ref=e351] [cursor=pointer]:
+                - strong [ref=e352]: 一次元的扦插
+                - generic [ref=e353]: 2026 · 更新至06集
+              - button [ref=e354] [cursor=pointer]
+          - article [ref=e357]:
+            - button "ALIUS - 特定事件调查档案 - 默认线路 A" [ref=e358] [cursor=pointer]:
+              - img "ALIUS - 特定事件调查档案 -" [ref=e359]
+              - generic [ref=e364]: 默认线路 A
+            - generic [ref=e365]:
+              - button "ALIUS - 特定事件调查档案 - 2026 · 更新至04集" [ref=e366] [cursor=pointer]:
+                - strong [ref=e367]: ALIUS - 特定事件调查档案 -
+                - generic [ref=e368]: 2026 · 更新至04集
+              - button [ref=e369] [cursor=pointer]
+          - article [ref=e372]:
+            - button "天才，女友 2 个来源" [ref=e373] [cursor=pointer]:
+              - img "天才，女友" [ref=e374]
+              - generic [ref=e379]: 2 个来源
+            - generic [ref=e380]:
+              - button "天才，女友 2026 · 更新至21集" [ref=e381] [cursor=pointer]:
+                - strong [ref=e382]: 天才，女友
+                - generic [ref=e383]: 2026 · 更新至21集
+              - button [ref=e384] [cursor=pointer]
+          - article [ref=e387]:
+            - button "饥饿游戏 默认线路 A" [ref=e388] [cursor=pointer]:
+              - img "饥饿游戏" [ref=e389]
+              - generic [ref=e394]: 默认线路 A
+            - generic [ref=e395]:
+              - button "饥饿游戏 2016 · 更新至20260802期" [ref=e396] [cursor=pointer]:
+                - strong [ref=e397]: 饥饿游戏
+                - generic [ref=e398]: 2016 · 更新至20260802期
+              - button [ref=e399] [cursor=pointer]
+          - article [ref=e402]:
+            - button "龙之家族第三季 默认线路 A" [ref=e403] [cursor=pointer]:
+              - img "龙之家族第三季" [ref=e404]
+              - generic [ref=e409]: 默认线路 A
+            - generic [ref=e410]:
+              - button "龙之家族第三季 2026 · 全08集" [ref=e411] [cursor=pointer]:
+                - strong [ref=e412]: 龙之家族第三季
+                - generic [ref=e413]: 2026 · 全08集
+              - button [ref=e414] [cursor=pointer]
+          - article [ref=e417]:
+            - button "综艺大集合 默认线路 A" [ref=e418] [cursor=pointer]:
+              - img "综艺大集合" [ref=e419]
+              - generic [ref=e424]: 默认线路 A
+            - generic [ref=e425]:
+              - button "综艺大集合 2001 · 更新至20260809期" [ref=e426] [cursor=pointer]:
+                - strong [ref=e427]: 综艺大集合
+                - generic [ref=e428]: 2001 · 更新至20260809期
+              - button [ref=e429] [cursor=pointer]
+          - article [ref=e432]:
+            - button "警字一号 默认线路 A" [ref=e433] [cursor=pointer]:
+              - img "警字一号" [ref=e434]
+              - generic [ref=e439]: 默认线路 A
+            - generic [ref=e440]:
+              - button "警字一号 2026 · 更新至32集" [ref=e441] [cursor=pointer]:
+                - strong [ref=e442]: 警字一号
+                - generic [ref=e443]: 2026 · 更新至32集
+              - button [ref=e444] [cursor=pointer]
+          - article [ref=e447]:
+            - button "斗罗大陆4终极斗罗 合集 默认线路 B" [ref=e448] [cursor=pointer]:
+              - img "斗罗大陆4终极斗罗 合集" [ref=e449]
+              - generic [ref=e454]: 默认线路 B
+            - generic [ref=e455]:
+              - button "斗罗大陆4终极斗罗 合集 2024 · 第199集" [ref=e456] [cursor=pointer]:
+                - strong [ref=e457]: 斗罗大陆4终极斗罗 合集
+                - generic [ref=e458]: 2024 · 第199集
+              - button [ref=e459] [cursor=pointer]
+          - article [ref=e462]:
+            - button "咱家剑宗团宠小师妹第一季 默认线路 B" [ref=e463] [cursor=pointer]:
+              - img "咱家剑宗团宠小师妹第一季" [ref=e464]
+              - generic [ref=e469]: 默认线路 B
+            - generic [ref=e470]:
+              - button "咱家剑宗团宠小师妹第一季 2026 · 第1季已完结" [ref=e471] [cursor=pointer]:
+                - strong [ref=e472]: 咱家剑宗团宠小师妹第一季
+                - generic [ref=e473]: 2026 · 第1季已完结
+              - button [ref=e474] [cursor=pointer]
+          - article [ref=e477]:
+            - button "两天一夜 第四季 默认线路 B" [ref=e478] [cursor=pointer]:
+              - img "两天一夜 第四季" [ref=e479]
+              - generic [ref=e484]: 默认线路 B
+            - generic [ref=e485]:
+              - button "两天一夜 第四季 2019 · 第260809期" [ref=e486] [cursor=pointer]:
+                - strong [ref=e487]: 两天一夜 第四季
+                - generic [ref=e488]: 2019 · 第260809期
+              - button [ref=e489] [cursor=pointer]
+          - article [ref=e492]:
+            - button "住在清潭洞 默认线路 B" [ref=e493] [cursor=pointer]:
+              - img "住在清潭洞" [ref=e494]
+              - generic [ref=e499]: 默认线路 B
+            - generic [ref=e500]:
+              - button "住在清潭洞 2011 · 第100集" [ref=e501] [cursor=pointer]:
+                - strong [ref=e502]: 住在清潭洞
+                - generic [ref=e503]: 2011 · 第100集
+              - button [ref=e504] [cursor=pointer]
+          - article [ref=e507]:
+            - button "人鱼(2026) 默认线路 B" [ref=e508] [cursor=pointer]:
+              - img "人鱼(2026)" [ref=e509]
+              - generic [ref=e514]: 默认线路 B
+            - generic [ref=e515]:
+              - button "人鱼(2026) 2026 · 第14集" [ref=e516] [cursor=pointer]:
+                - strong [ref=e517]: 人鱼(2026)
+                - generic [ref=e518]: 2026 · 第14集
+              - button [ref=e519] [cursor=pointer]
+          - article [ref=e522]:
+            - button "吞噬星空 默认线路 B" [ref=e523] [cursor=pointer]:
+              - img "吞噬星空" [ref=e524]
+              - generic [ref=e529]: 默认线路 B
+            - generic [ref=e530]:
+              - button "吞噬星空 2020 · 第236集" [ref=e531] [cursor=pointer]:
+                - strong [ref=e532]: 吞噬星空
+                - generic [ref=e533]: 2020 · 第236集
+              - button [ref=e534] [cursor=pointer]
+          - article [ref=e537]:
+            - button "海贼王 默认线路 B" [ref=e538] [cursor=pointer]:
+              - img "海贼王" [ref=e539]
+              - generic [ref=e544]: 默认线路 B
+            - generic [ref=e545]:
+              - button "海贼王 1999 · 艾格赫德前半总集篇" [ref=e546] [cursor=pointer]:
+                - strong [ref=e547]: 海贼王
+                - generic [ref=e548]: 1999 · 艾格赫德前半总集篇
+              - button [ref=e549] [cursor=pointer]
+          - article [ref=e552]:
+            - button "重器 默认线路 B" [ref=e553] [cursor=pointer]:
+              - img "重器" [ref=e554]
+              - generic [ref=e559]: 默认线路 B
+            - generic [ref=e560]:
+              - button "重器 2026 · 第4集" [ref=e561] [cursor=pointer]:
+                - strong [ref=e562]: 重器
+                - generic [ref=e563]: 2026 · 第4集
+              - button [ref=e564] [cursor=pointer]
+          - article [ref=e567]:
+            - button "四时有信盛夏札记 默认线路 B" [ref=e568] [cursor=pointer]:
+              - img "四时有信盛夏札记" [ref=e569]
+              - generic [ref=e574]: 默认线路 B
+            - generic [ref=e575]:
+              - button "四时有信盛夏札记 2026 · 第1集" [ref=e576] [cursor=pointer]:
+                - strong [ref=e577]: 四时有信盛夏札记
+                - generic [ref=e578]: 2026 · 第1集
+              - button [ref=e579] [cursor=pointer]
+          - article [ref=e582]:
+            - button "夏日暗涌 默认线路 B" [ref=e583] [cursor=pointer]:
+              - img "夏日暗涌" [ref=e584]
+              - generic [ref=e589]: 默认线路 B
+            - generic [ref=e590]:
+              - button "夏日暗涌 2025 · 伦理片" [ref=e591] [cursor=pointer]:
+                - strong [ref=e592]: 夏日暗涌
+                - generic [ref=e593]: 2025 · 伦理片
+              - button [ref=e594] [cursor=pointer]
+          - article [ref=e597]:
+            - button "糖妈 默认线路 B" [ref=e598] [cursor=pointer]:
+              - img "糖妈" [ref=e599]
+              - generic [ref=e604]: 默认线路 B
+            - generic [ref=e605]:
+              - button "糖妈 2026 · 伦理片" [ref=e606] [cursor=pointer]:
+                - strong [ref=e607]: 糖妈
+                - generic [ref=e608]: 2026 · 伦理片
+              - button [ref=e609] [cursor=pointer]
+          - article [ref=e612]:
+            - button "毛雪汪 默认线路 B" [ref=e613] [cursor=pointer]:
+              - img "毛雪汪" [ref=e614]
+              - generic [ref=e619]: 默认线路 B
+            - generic [ref=e620]:
+              - button "毛雪汪 2021 · 第150期" [ref=e621] [cursor=pointer]:
+                - strong [ref=e622]: 毛雪汪
+                - generic [ref=e623]: 2021 · 第150期
+              - button [ref=e624] [cursor=pointer]
+          - article [ref=e627]:
+            - button "神兽猎局 默认线路 B" [ref=e628] [cursor=pointer]:
+              - img "神兽猎局" [ref=e629]
+              - generic [ref=e634]: 默认线路 B
+            - generic [ref=e635]:
+              - button "神兽猎局 2026 · 第1集" [ref=e636] [cursor=pointer]:
+                - strong [ref=e637]: 神兽猎局
+                - generic [ref=e638]: 2026 · 第1集
+              - button [ref=e639] [cursor=pointer]
+          - article [ref=e642]:
+            - button "脱口秀和Ta的朋友们 第三季 默认线路 B" [ref=e643] [cursor=pointer]:
+              - img "脱口秀和Ta的朋友们 第三季" [ref=e644]
+              - generic [ref=e649]: 默认线路 B
+            - generic [ref=e650]:
+              - button "脱口秀和Ta的朋友们 第三季 2026 · 第6期脱友日记" [ref=e651] [cursor=pointer]:
+                - strong [ref=e652]: 脱口秀和Ta的朋友们 第三季
+                - generic [ref=e653]: 2026 · 第6期脱友日记
+              - button [ref=e654] [cursor=pointer]
+          - article [ref=e657]:
+            - button "痴态七变化：外送小姐的魔性救赎 默认线路 B" [ref=e658] [cursor=pointer]:
+              - img "痴态七变化：外送小姐的魔性救赎" [ref=e659]
+              - generic [ref=e664]: 默认线路 B
+            - generic [ref=e665]:
+              - button "痴态七变化：外送小姐的魔性救赎 2024 · 伦理片" [ref=e666] [cursor=pointer]:
+                - strong [ref=e667]: 痴态七变化：外送小姐的魔性救赎
+                - generic [ref=e668]: 2024 · 伦理片
+              - button [ref=e669] [cursor=pointer]
+          - article [ref=e672]:
+            - button "神探默多克 第十九季 默认线路 B" [ref=e673] [cursor=pointer]:
+              - img "神探默多克 第十九季" [ref=e674]
+              - generic [ref=e679]: 默认线路 B
+            - generic [ref=e680]:
+              - button "神探默多克 第十九季 2025 · 第8集" [ref=e681] [cursor=pointer]:
+                - strong [ref=e682]: 神探默多克 第十九季
+                - generic [ref=e683]: 2025 · 第8集
+              - button [ref=e684] [cursor=pointer]

@@ -1,0 +1,5 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="FixtureOne" group-title="设备验收",Fixture One
+https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+#EXTINF:-1 tvg-id="FixtureTwo" group-title="设备验收",Fixture Two
+https://test-streams.mux.dev/test_001/stream.m3u8

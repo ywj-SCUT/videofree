@@ -33,13 +33,13 @@ void main() {
       expect(engine.inferMediaCategory('综艺'), MediaCategory.series);
     });
 
-    test('识别短剧', () {
-      expect(engine.inferMediaCategory('短剧'), MediaCategory.short);
+    test('识别短视频', () {
+      expect(engine.inferMediaCategory('短视频'), MediaCategory.short);
       expect(engine.inferMediaCategory('微剧'), MediaCategory.short);
     });
 
-    test('识别 AI 短剧', () {
-      expect(engine.inferMediaCategory('AI短剧'), MediaCategory.aiShort);
+    test('识别 AI 短视频', () {
+      expect(engine.inferMediaCategory('AI 短视频'), MediaCategory.aiShort);
     });
 
     test('默认电影', () {
@@ -208,7 +208,11 @@ class _FakeSpiderRuleExecutor implements SpiderRuleExecutor {
   dynamic lastToken;
 
   @override
-  Future<dynamic> search(CmsSource source, String query) async => [
+  Future<dynamic> search(
+    CmsSource source,
+    String query, [
+    int page = 1,
+  ]) async => [
     {
       'id': 'spider-1',
       'title': query,

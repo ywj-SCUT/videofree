@@ -4,8 +4,9 @@ abstract interface class VideoEngine {
   Future<SearchResponse> search(
     String query,
     MediaCategory category,
-    List<CmsSource> sources,
-  );
+    List<CmsSource> sources, [
+    int page = 1,
+  ]);
 
   Future<MediaItem?> detail(
     String sourceId,

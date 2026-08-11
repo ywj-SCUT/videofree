@@ -4,7 +4,7 @@ import artplayerPluginDanmuku, { type Result as DanmakuPlugin } from 'artplayer-
 import Hls from 'hls.js';
 import {
   Captions, CaptionsOff, Check, ChevronDown, Clapperboard, Clock3, Compass, Film, Heart, Info,
-  LoaderCircle, Maximize2, Minimize2, Minus, MonitorPlay, Pause, Play, Plus, Search,
+  KeyRound, LoaderCircle, Maximize2, Minimize2, Minus, MonitorPlay, Pause, Play, Plus, Search,
   Settings, Sparkles, Star, Trash2, Upload, Volume2, VolumeX, X,
 } from 'lucide-react';
 import type { AppSettings, CmsSource, DanmakuProvider, HistoryItem, LibraryState, MediaCategory, MediaItem } from './types';
@@ -111,23 +111,71 @@ function App() {
   const [category, setCategory] = useState<MediaCategory>('all');
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [shortHasMore, setShortHasMore] = useState(false);
   const [searchMeta, setSearchMeta] = useState({ elapsedMs: 0, failures: 0 });
   const [settings, setSettings] = useState<AppSettings>(emptySettings);
   const [library, setLibrary] = useState<LibraryState>(emptyLibrary);
   const [selected, setSelected] = useState<MediaItem | null>(null);
   const [resume, setResume] = useState<HistoryItem | null>(null);
   const searchTimer = useRef<number>();
+  const searchRequest = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const itemsRef = useRef<MediaItem[]>([]);
+  const shortFeedRef = useRef<{ mode: MediaCategory; page: number; hasMore: boolean }>({ mode: 'short', page: 1, hasMore: false });
   const libraryRef = useRef<LibraryState>(emptyLibrary);
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
 
   const searchMedia = useCallback(async (nextQuery: string, nextCategory: MediaCategory) => {
+    const requestId = ++searchRequest.current;
     setLoading(true);
     try {
-      const response = await window.lumen.search(nextQuery, nextCategory);
+      const response = await window.lumen.search(nextQuery, nextCategory, 1);
+      if (requestId !== searchRequest.current) return;
+      itemsRef.current = response.items;
       setItems(response.items);
       setSearchMeta({ elapsedMs: response.elapsedMs, failures: response.failures.length });
+      const isShortFeed = nextCategory === 'short' || nextCategory === 'ai-short';
+      shortFeedRef.current = { mode: nextCategory, page: response.page, hasMore: isShortFeed && response.hasMore };
+      setShortHasMore(isShortFeed && response.hasMore);
     } finally {
-      setLoading(false);
+      if (requestId === searchRequest.current) setLoading(false);
+    }
+  }, []);
+
+  const loadMoreShorts = useCallback(async (mode: MediaCategory) => {
+    const feed = shortFeedRef.current;
+    if (loadingMoreRef.current || feed.mode !== mode || !feed.hasMore) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const requestId = searchRequest.current;
+    let page = feed.page;
+    let hasMore: boolean = feed.hasMore;
+    let fresh: MediaItem[] = [];
+    let elapsedMs = 0;
+    let failures = 0;
+    try {
+      const known = new Set(itemsRef.current.map((item) => `${item.sourceId}:${item.id}`));
+      for (let attempt = 0; attempt < 4 && hasMore && !fresh.length; attempt += 1) {
+        const response = await window.lumen.search('', mode, page + 1);
+        if (requestId !== searchRequest.current || shortFeedRef.current.mode !== mode) return;
+        page = response.page;
+        hasMore = response.hasMore;
+        elapsedMs += response.elapsedMs;
+        failures += response.failures.length;
+        fresh = response.items.filter((item) => !known.has(`${item.sourceId}:${item.id}`));
+      }
+      if (fresh.length) {
+        const next = [...itemsRef.current, ...fresh];
+        itemsRef.current = next;
+        setItems(next);
+      }
+      shortFeedRef.current = { mode, page, hasMore };
+      setShortHasMore(hasMore);
+      if (elapsedMs) setSearchMeta({ elapsedMs, failures });
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
     }
   }, []);
 
@@ -239,7 +287,7 @@ function App() {
           <SearchView query={query} setQuery={setQuery} category={category} setCategory={setCategory} items={items} loading={loading}
             meta={searchMeta} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} proxyPort={settings.proxyPort} />
         )}
-        {view === 'shorts' && <ShortsView items={items} loading={loading} onOpen={openMedia} onMode={(mode) => { setCategory(mode); void searchMedia('', mode); }} mode={category} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} settings={settings} />}
+        {view === 'shorts' && <ShortsView items={items} loading={loading} loadingMore={loadingMore} hasMore={shortHasMore} onLoadMore={() => loadMoreShorts(category)} onOpen={openMedia} onMode={(mode) => { setCategory(mode); void searchMedia('', mode); }} mode={category} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} settings={settings} />}
         {view === 'favorites' && <LibraryView mode="favorites" items={library.favorites} onOpen={openMedia} onRemove={toggleFavorite} onClear={() => clearLibrarySection('favorites')} proxyPort={settings.proxyPort} />}
         {view === 'history' && <LibraryView mode="history" items={library.history} onOpen={openMedia} onRemove={removeHistory} onClear={() => clearLibrarySection('history')} proxyPort={settings.proxyPort} />}
         {view === 'settings' && <SettingsView settings={settings} onSettings={setSettings} />}
@@ -260,7 +308,7 @@ function TitleBar() {
 function Discover({ items, loading, onOpen, favoriteKeys, onFavorite, onSearch, proxyPort }: MediaGridProps & { onSearch: () => void }) {
   const featured = items[0];
   return <div className="page discover-page">
-    <header className="page-header"><div><span className="eyebrow">今晚看什么</span><h1>发现好内容</h1></div><button className="search-launcher" onClick={onSearch}><Search size={17} /><span>搜索电影、剧集、动漫、短剧</span><kbd>Ctrl K</kbd></button></header>
+    <header className="page-header"><div><span className="eyebrow">今晚看什么</span><h1>发现好内容</h1></div><button className="search-launcher" onClick={onSearch}><Search size={17} /><span>搜索电影、剧集、动漫、短视频</span><kbd>Ctrl K</kbd></button></header>
     {featured && <section className="featured" style={{ backgroundImage: `linear-gradient(90deg, rgba(8,8,10,.94) 0%, rgba(8,8,10,.6) 48%, rgba(8,8,10,.12) 100%), url("${imageUrl(featured.backdrop ?? featured.poster, proxyPort, 1600, 900)}")` }}>
       <div className="featured-content"><span className="featured-kicker">开放影院精选</span><h2>{featured.title}</h2><p>{featured.summary}</p><div className="featured-meta"><span>{featured.year}</span><span>{featured.quality}</span><span>{featured.remarks}</span></div><button className="primary-button" onClick={() => onOpen(featured)}><Play size={17} fill="currentColor" />立即播放</button></div>
     </section>}
@@ -280,9 +328,9 @@ function SearchView({ query, setQuery, category, setCategory, items, loading, me
 
 interface ShortPlayback { url: string; originalUrl: string }
 
-function ShortFeedItem({ item, index, total, settings, favorite, onFavorite, onOpen }: {
-  item: MediaItem; index: number; total: number; settings: AppSettings; favorite: boolean;
-  onFavorite: (item: MediaItem) => void; onOpen: (item: MediaItem) => void;
+function ShortFeedItem({ item, index, settings, favorite, onFavorite, onOpen, onActive }: {
+  item: MediaItem; index: number; settings: AppSettings; favorite: boolean;
+  onFavorite: (item: MediaItem) => void; onOpen: (item: MediaItem) => void; onActive: (index: number) => void;
 }) {
   const rootRef = useRef<HTMLElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -298,17 +346,29 @@ function ShortFeedItem({ item, index, total, settings, favorite, onFavorite, onO
     const element = rootRef.current;
     if (!element || !('IntersectionObserver' in window)) {
       setActive(true);
+      onActive(index);
       return;
     }
     const root = element.closest('.short-feed');
     const observer = new IntersectionObserver(([entry]) => {
       const nextActive = entry.isIntersecting && entry.intersectionRatio >= 0.68;
       setActive(nextActive);
+      if (nextActive) onActive(index);
       if (!nextActive) setPausedByUser(false);
     }, { root, threshold: [0, 0.68, 1] });
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [index, onActive]);
+
+  useEffect(() => {
+    if (active) return;
+    const timer = window.setTimeout(() => {
+      setPlayback(null);
+      setPlaybackError('');
+      setPlaying(false);
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [active]);
 
   useEffect(() => {
     if (!active || playback || playbackError) return;
@@ -321,7 +381,7 @@ function ShortFeedItem({ item, index, total, settings, favorite, onFavorite, onO
         if (!episode) throw new Error('暂无可播放内容');
         let url = episode.url;
         let headers = episode.headers;
-        if (url.startsWith('videoget-rule:')) {
+        if (url.startsWith('videoget-rule:') || url.startsWith('videoget-short:')) {
           const resolved = await window.lumen.play(episode.sourceId ?? item.sourceId, url);
           url = resolved.url;
           headers = resolved.headers;
@@ -387,7 +447,7 @@ function ShortFeedItem({ item, index, total, settings, favorite, onFavorite, onO
     <img className="short-feed-poster" src={imageUrl(item.backdrop ?? item.poster, settings.proxyPort, 1280, 1920)} alt="" />
     <video ref={videoRef} className={playback && !playbackError ? 'short-feed-video ready' : 'short-feed-video'} muted={muted} loop playsInline preload="metadata" poster={imageUrl(item.poster, settings.proxyPort, 800, 1200)} onClick={togglePlayback} />
     <span className="short-feed-shade" />
-    <div className="short-feed-top"><span>推荐</span><small>{String(index + 1).padStart(2, '0')} / {String(total).padStart(2, '0')}</small></div>
+    <div className="short-feed-top"><span>推荐</span><small>第 {String(index + 1).padStart(2, '0')} 条</small></div>
     <div className="short-feed-copy"><span className="short-feed-source">{item.sourceName} · {item.category === 'ai-short' ? 'AI 短视频' : '短视频'}</span><h2>{item.title}</h2><p>{item.summary || item.remarks || '向上滑动继续浏览，点击画面暂停或播放。'}</p><div className="short-feed-meta"><span>{item.year || '精选'}</span><span>{item.quality || '自动画质'}</span><span>{item.remarks || '短内容'}</span></div></div>
     <div className="short-feed-actions">
       <button className={favorite ? 'active' : ''} aria-label={favorite ? '取消收藏' : '收藏'} title={favorite ? '取消收藏' : '收藏'} onClick={() => onFavorite(item)}><Heart size={21} fill={favorite ? 'currentColor' : 'none'} /><span>收藏</span></button>
@@ -395,16 +455,24 @@ function ShortFeedItem({ item, index, total, settings, favorite, onFavorite, onO
       <button aria-label={muted ? '开启声音' : '静音'} title={muted ? '开启声音' : '静音'} onClick={() => setMuted((value) => !value)}>{muted ? <VolumeX size={21} /> : <Volume2 size={21} />}<span>声音</span></button>
     </div>
     <button className={playing ? 'short-feed-toggle playing' : 'short-feed-toggle'} aria-label={playing ? '暂停' : '播放'} onClick={togglePlayback}>{loadingPlayback ? <LoaderCircle className="spin" size={30} /> : playing ? <Pause size={26} fill="currentColor" /> : <Play size={26} fill="currentColor" />}</button>
-    {playbackError && <button className="short-feed-error" onClick={() => onOpen(item)}>{playbackError} · 打开详情</button>}
+    {playbackError && <button className="short-feed-error" onClick={() => { setPlayback(null); setPlaybackError(''); }}>{playbackError} · 重试</button>}
   </article>;
 }
 
-function ShortsView({ items, loading, onOpen, mode, onMode, favoriteKeys, onFavorite, settings }: {
-  items: MediaItem[]; loading: boolean; onOpen: (item: MediaItem) => void; mode: MediaCategory;
+function ShortsView({ items, loading, loadingMore, hasMore, onLoadMore, onOpen, mode, onMode, favoriteKeys, onFavorite, settings }: {
+  items: MediaItem[]; loading: boolean; loadingMore: boolean; hasMore: boolean; onLoadMore: () => void; onOpen: (item: MediaItem) => void; mode: MediaCategory;
   onMode: (mode: MediaCategory) => void; favoriteKeys: Set<string>; onFavorite: (item: MediaItem) => void; settings: AppSettings;
 }) {
+  const handleActive = useCallback((index: number) => {
+    if (index >= items.length - 3) onLoadMore();
+  }, [items.length, onLoadMore]);
+
+  useEffect(() => {
+    if (!loading && !loadingMore && hasMore && items.length > 0 && items.length <= 3) onLoadMore();
+  }, [hasMore, items.length, loading, loadingMore, onLoadMore]);
+
   return <div className="page shorts-page"><header className="page-header"><div><span className="eyebrow">沉浸浏览</span><h1>短视频</h1></div><div className="segmented-control compact"><button className={mode === 'short' ? 'selected' : ''} onClick={() => onMode('short')}>短视频</button><button className={mode === 'ai-short' ? 'selected' : ''} onClick={() => onMode('ai-short')}>AI 短视频</button></div></header>
-    {loading && !items.length ? <LoadingGrid /> : items.length ? <div className="short-feed">{items.map((item, index) => <ShortFeedItem key={`${item.sourceId}:${item.id}`} item={item} index={index} total={items.length} settings={settings} favorite={favoriteKeys.has(`${item.sourceId}:${item.id}`)} onFavorite={onFavorite} onOpen={onOpen} />)}</div> : <EmptyState icon={Sparkles} title="还没有短视频" text="在设置中添加包含短视频分类的点播来源。" />}
+    {loading && !items.length ? <LoadingGrid /> : items.length ? <div className="short-feed">{items.map((item, index) => <ShortFeedItem key={`${item.sourceId}:${item.id}`} item={item} index={index} settings={settings} favorite={favoriteKeys.has(`${item.sourceId}:${item.id}`)} onFavorite={onFavorite} onOpen={onOpen} onActive={handleActive} />)}{loadingMore && <div className="short-feed-loading"><LoaderCircle className="spin" size={18} />正在载入</div>}</div> : <EmptyState icon={Sparkles} title="还没有短视频" text="在设置中启用短视频平台 API 或添加包含短视频分类的点播来源。" />}
   </div>;
 }
 
@@ -436,10 +504,23 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
   const [importing, setImporting] = useState(false);
   const [danmakuName, setDanmakuName] = useState('');
   const [danmakuApi, setDanmakuApi] = useState('');
+  const [tikHubToken, setTikHubToken] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const saveSources = async (sources: CmsSource[]) => onSettings(await window.lumen.saveSources(sources));
   const saveDanmakuProviders = async (providers: DanmakuProvider[]) => onSettings(await window.lumen.saveDanmakuProviders(providers));
+  const tikHubConfigured = settings.sources.some((source) => source.provider?.startsWith('tikhub-') && /^Bearer\s+\S+/i.test(source.headers?.Authorization ?? ''));
+  const saveTikHub = async () => {
+    const token = tikHubToken.trim();
+    if (!token) return;
+    await saveSources(settings.sources.map((source) => source.provider?.startsWith('tikhub-') ? {
+      ...source,
+      enabled: true,
+      headers: { ...source.headers, Authorization: `Bearer ${token}` },
+    } : source));
+    setTikHubToken('');
+    setTestResult((current) => ({ ...current, tikhub: 'Token 已保存在本机，抖音与 YouTube Shorts 已启用' }));
+  };
   const addSource = () => {
     if (!name.trim() || !/^https?:\/\//i.test(api)) return;
     void saveSources([...settings.sources, { id: `cms-${Date.now()}`, name: name.trim(), type: 'cms', api: api.trim(), enabled: true, searchable: true }]);
@@ -488,12 +569,16 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
     setTesting(null);
   };
   return <div className="page settings-page"><header className="page-header"><div><span className="eyebrow">本机配置</span><h1>设置</h1></div></header>
+    <section className="settings-section"><div className="settings-heading"><div><h2>短视频平台 API</h2><p>TikTok 公共推荐默认启用；TikHub Token 用于抖音推荐与 YouTube Shorts。</p></div><span className="source-state"><span className={tikHubConfigured ? 'status-dot' : 'status-dot off'} />{tikHubConfigured ? '已配置' : '未配置'}</span></div>
+      {testResult.tikhub && <div className="inline-notice"><Check size={15} />{testResult.tikhub}</div>}
+      <div className="import-url"><div className="field-with-icon"><KeyRound size={16} /><input type="password" value={tikHubToken} onChange={(event) => setTikHubToken(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void saveTikHub(); }} placeholder={tikHubConfigured ? '输入新 Token 进行更新' : 'TikHub Bearer Token'} /></div><button className="primary-button" disabled={!tikHubToken.trim()} onClick={() => void saveTikHub()}><Check size={16} />保存并启用</button></div>
+    </section>
     <section className="settings-section"><div className="settings-heading"><div><h2>视频来源</h2><p>支持苹果 CMS 与 TVBox 点播配置，短视频会按来源分类自动聚合。</p></div><div className="settings-actions"><button className="secondary-button" disabled={importing} onClick={() => fileRef.current?.click()}><Upload size={16} />{importing ? '导入中' : '导入配置'}</button></div><input ref={fileRef} type="file" accept=".json,.txt,application/json,text/plain" hidden onChange={(event) => { void importFile(event.target.files?.[0]); event.currentTarget.value = ''; }} /></div>
       {testResult.import && <div className="inline-notice"><Check size={15} />{testResult.import}</div>}
       <div className="import-url"><input value={importUrl} onChange={(event) => setImportUrl(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void importRemoteUrl(); }} placeholder="TVBox 点播配置地址" /><button className="secondary-button" disabled={importing || !/^https?:\/\//i.test(importUrl.trim())} onClick={() => void importRemoteUrl()}><Upload size={16} />导入 URL</button></div>
       <div className="add-source"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="来源名称" /><input value={api} onChange={(event) => setApi(event.target.value)} placeholder="https://example.com/api.php/provide/vod/" /><button className="primary-button" onClick={addSource}><Plus size={16} />添加</button></div>
       <div className="source-list"><div className="source-row builtin"><span className="source-logo"><Film size={17} /></span><div><strong>开放影院</strong><small>内置演示 · 可验证高清播放</small></div><span className="source-state"><span className="status-dot" />已启用</span></div>
-        {settings.sources.map((source) => <div className="source-row" key={source.id}><button className={source.enabled ? 'toggle on' : 'toggle'} onClick={() => void saveSources(settings.sources.map((entry) => entry.id === source.id ? { ...entry, enabled: !entry.enabled } : entry))}><span /></button><div><strong>{source.name}</strong><small>{source.type === 'cms' ? source.api : 'Spider 规则'}</small>{testResult[source.id] && <em>{testResult[source.id]}</em>}</div><button className="text-button" onClick={() => void test(source)} disabled={testing === source.id}>{testing === source.id ? '检测中' : '检测'}</button><button className="icon-button danger" onClick={() => void saveSources(settings.sources.filter((entry) => entry.id !== source.id))}><Trash2 size={16} /></button></div>)}
+        {settings.sources.map((source) => <div className="source-row" key={source.id}><button className={source.enabled ? 'toggle on' : 'toggle'} onClick={() => void saveSources(settings.sources.map((entry) => entry.id === source.id ? { ...entry, enabled: !entry.enabled } : entry))}><span /></button><div><strong>{source.name}</strong><small>{source.type === 'cms' ? source.api : source.type === 'short-api' ? `平台接口 · ${source.provider}` : 'Spider 规则'}</small>{testResult[source.id] && <em>{testResult[source.id]}</em>}</div><button className="text-button" onClick={() => void test(source)} disabled={testing === source.id}>{testing === source.id ? '检测中' : '检测'}</button>{!source.id.startsWith('builtin-') && <button className="icon-button danger" onClick={() => void saveSources(settings.sources.filter((entry) => entry.id !== source.id))}><Trash2 size={16} /></button>}</div>)}
       </div>
     </section>
     <section className="settings-section"><div className="settings-heading"><div><h2>播放质量</h2><p>优先选择源提供的最高分辨率；实际画质由视频源决定。</p></div></div><div className="quality-options">{(['highest', 'auto', '1080p', '720p'] as const).map((quality) => <button key={quality} className={settings.qualityPreference === quality ? 'selected' : ''} onClick={() => void window.lumen.saveQuality(quality).then(onSettings)}><span>{quality === 'highest' ? '最高画质' : quality === 'auto' ? '智能适配' : quality.toUpperCase()}</span>{settings.qualityPreference === quality && <Check size={16} />}</button>)}</div><div className="source-list playback-options"><div className="source-row"><button className={settings.adFiltering ? 'toggle on' : 'toggle'} onClick={() => void window.lumen.saveAdFiltering(!settings.adFiltering).then(onSettings)}><span /></button><div><strong>HLS 广告片段过滤</strong><small>识别 CUE、SCTE-35、Interstitial 与广告分片路径</small></div><span className="source-state">{settings.adFiltering ? '已开启' : '已关闭'}</span></div></div></section>
@@ -551,7 +636,7 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
     };
     void (async () => {
       try {
-        const resolved = current.url.startsWith('videoget-rule:')
+        const resolved = current.url.startsWith('videoget-rule:') || current.url.startsWith('videoget-short:')
           ? await window.lumen.play(current.sourceId ?? item.sourceId, current.url)
           : { url: current.url, headers: current.headers };
         if (!active || !container.current) return;

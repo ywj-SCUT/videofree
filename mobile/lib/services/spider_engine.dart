@@ -13,7 +13,7 @@ import 'net_service.dart';
 /// `request` is bridged back to Dart so headers, limits, and timeouts remain
 /// under the mobile client's control.
 abstract interface class SpiderRuleExecutor {
-  Future<dynamic> search(CmsSource source, String query);
+  Future<dynamic> search(CmsSource source, String query, [int page = 1]);
   Future<dynamic> detail(CmsSource source, String id);
   Future<dynamic> play(CmsSource source, dynamic token);
 }
@@ -30,8 +30,8 @@ class FlutterJsSpiderEngine implements SpiderRuleExecutor {
   );
 
   @override
-  Future<dynamic> search(CmsSource source, String query) =>
-      _run(source, 'search', {'query': query, 'page': 1});
+  Future<dynamic> search(CmsSource source, String query, [int page = 1]) =>
+      _run(source, 'search', {'query': query, 'page': page});
 
   @override
   Future<dynamic> detail(CmsSource source, String id) =>

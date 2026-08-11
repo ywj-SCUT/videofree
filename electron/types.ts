@@ -40,7 +40,7 @@ export interface MediaItem {
 export interface CmsSource {
   id: string;
   name: string;
-  type: 'cms' | 'spider';
+  type: 'cms' | 'spider' | 'short-api';
   api?: string;
   enabled: boolean;
   searchable: boolean;
@@ -49,6 +49,8 @@ export interface CmsSource {
   script?: string;
   scriptUrl?: string;
   ruleConfig?: Record<string, unknown>;
+  provider?: 'tikwm' | 'tikhub-douyin' | 'tikhub-tiktok' | 'tikhub-youtube';
+  region?: string;
 }
 
 export interface PlaybackResolution {
@@ -97,6 +99,8 @@ export interface SearchResponse {
   items: MediaItem[];
   failures: Array<{ sourceId: string; sourceName: string; message: string }>;
   elapsedMs: number;
+  page: number;
+  hasMore: boolean;
 }
 
 export interface HistoryItem extends MediaItem {

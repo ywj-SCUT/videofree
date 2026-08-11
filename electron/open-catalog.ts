@@ -34,8 +34,8 @@ export const OPEN_CATALOG: MediaItem[] = [
   {
     id: 'open-for-bigger-blazes', sourceId: 'open-cinema', sourceName: '开放影院',
     title: 'AI 影像工作流演示', poster: './posters/ai-short-demo.jpg',
-    year: '2025', remarks: 'AI短剧工作流示例', category: 'ai-short', quality: '1080P',
-    summary: '用于验证 AI 短剧分类、竖屏模式和播放链路的开放演示素材。',
+    year: '2025', remarks: 'AI 短视频工作流示例', category: 'ai-short', quality: '1080P',
+    summary: '用于验证 AI 短视频分类、竖屏模式和播放链路的开放演示素材。',
     playLines: [{ name: '演示', episodes: [{ name: '第 1 集', url: 'https://archive.org/download/springopenmovie/springopenmovie.mp4' }] }],
   },
 ];
