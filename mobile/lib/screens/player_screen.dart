@@ -43,6 +43,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<VideoTrack> _videoTracks = [VideoTrack.auto()];
   String _selectedTrackId = 'auto';
   bool _preferenceApplied = false;
+  double _playbackRate = 1.0;
 
   @override
   void initState() {
@@ -81,6 +82,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     HapticFeedback.selectionClick();
     await _player.setVideoTrack(track);
     if (mounted) setState(() => _selectedTrackId = track.id);
+  }
+  Future<void> _setPlaybackRate(double rate) async {
+    HapticFeedback.selectionClick();
+    await _player.setRate(rate);
+    if (mounted) setState(() => _playbackRate = rate);
   }
 
   Future<void> _openCurrent() async {
@@ -210,6 +216,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               : null,
                         ),
                         Expanded(child: Text(videoTrackLabel(track))),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+          PopupMenuButton<double>(
+            tooltip: '倍速播放',
+            icon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.speed_rounded, size: 18),
+                const SizedBox(width: 2),
+                Text(
+                    '$_playbackRate' 'x',
+                    style: const TextStyle(fontSize: 12)),
+              ],
+            ),
+            onSelected: _setPlaybackRate,
+            itemBuilder: (context) => [1.0, 1.5, 2.0]
+                .map(
+                  (rate) => PopupMenuItem(
+                    value: rate,
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 26,
+                          child: rate == _playbackRate
+                              ? Icon(Icons.check_rounded,
+                                  size: 18, color: colors.primary)
+                              : null,
+                        ),
+                        Text('${rate.toStringAsFixed(1)}x'),
                       ],
                     ),
                   ),
