@@ -252,14 +252,11 @@ class SourceEngine {
   ]) async {
     final currentPage = page < 1 ? 1 : page;
     final stopwatch = Stopwatch()..start();
-    final active = sources
-        .where(
-          (source) =>
-              source.enabled &&
-              source.searchable &&
-              (source.type != 'short-api' || category == MediaCategory.short),
-        )
-        .toList();
+    final active = sources.where((source) {
+      if (!source.enabled || !source.searchable) return false;
+      if (category == MediaCategory.short) return source.type == 'short-api';
+      return source.type != 'short-api';
+    }).toList();
     final attempts = await Future.wait(
       active.map((source) async {
         try {

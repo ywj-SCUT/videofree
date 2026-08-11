@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:videoget_mobile/models/models.dart';
+import 'package:videoget_mobile/services/short_video_engine.dart';
 import 'package:videoget_mobile/services/source_engine.dart';
 import 'package:videoget_mobile/services/spider_engine.dart';
 
@@ -129,6 +130,67 @@ void main() {
     });
   });
 
+  group('短视频平台来源隔离', () {
+    test('短视频分类只查询 short-api 来源', () async {
+      final filteredSpider = _FakeSpiderRuleExecutor();
+      final shorts = _FakeShortVideoEngine();
+      final filteredEngine = SourceEngine(
+        spider: filteredSpider,
+        shorts: shorts,
+      );
+      final response = await filteredEngine.aggregateSearch(
+        [
+          const CmsSource(
+            id: 'cms-short',
+            name: '普通点播源',
+            type: 'spider',
+            enabled: true,
+            searchable: true,
+          ),
+          const CmsSource(
+            id: 'platform-short',
+            name: '平台短视频',
+            type: 'short-api',
+            api: 'https://api.example.com',
+            provider: 'tikhub-tiktok',
+            enabled: true,
+            searchable: true,
+          ),
+        ],
+        '',
+        MediaCategory.short,
+      );
+
+      expect(filteredSpider.searchCalls, 0);
+      expect(shorts.searchCalls, 1);
+      expect(response.items, hasLength(1));
+      expect(response.items.single.sourceId, 'platform-short');
+    });
+
+    test('AI 短视频分类不会查询平台来源', () async {
+      final shorts = _FakeShortVideoEngine();
+      final filteredEngine = SourceEngine(shorts: shorts);
+      final response = await filteredEngine.aggregateSearch(
+        [
+          const CmsSource(
+            id: 'platform-short',
+            name: '平台短视频',
+            type: 'short-api',
+            api: 'https://api.example.com',
+            provider: 'tikhub-tiktok',
+            enabled: true,
+            searchable: true,
+          ),
+        ],
+        '',
+        MediaCategory.aiShort,
+      );
+
+      expect(shorts.searchCalls, 0);
+      expect(response.items, isEmpty);
+    });
+  });
+
   group('importTvBox', () {
     test('解析 type=1 CMS 和 type=3 Spider 源', () {
       final imported = engine.importTvBox({
@@ -206,20 +268,20 @@ void main() {
 
 class _FakeSpiderRuleExecutor implements SpiderRuleExecutor {
   dynamic lastToken;
+  int searchCalls = 0;
 
   @override
-  Future<dynamic> search(
-    CmsSource source,
-    String query, [
-    int page = 1,
-  ]) async => [
-    {
-      'id': 'spider-1',
-      'title': query,
-      'category': 'series',
-      'poster': 'https://img.example.com/spider.jpg',
-    },
-  ];
+  Future<dynamic> search(CmsSource source, String query, [int page = 1]) async {
+    searchCalls++;
+    return [
+      {
+        'id': 'spider-1',
+        'title': query,
+        'category': 'series',
+        'poster': 'https://img.example.com/spider.jpg',
+      },
+    ];
+  }
 
   @override
   Future<dynamic> detail(CmsSource source, String id) async => {
@@ -246,5 +308,31 @@ class _FakeSpiderRuleExecutor implements SpiderRuleExecutor {
       'url': _url,
       'headers': {'Referer': 'https://example.com/'},
     };
+  }
+}
+
+class _FakeShortVideoEngine extends ShortVideoEngine {
+  int searchCalls = 0;
+
+  @override
+  Future<SourceSearchPage> search(
+    CmsSource source,
+    String query,
+    int page,
+  ) async {
+    searchCalls++;
+    return SourceSearchPage(
+      items: [
+        MediaItem(
+          id: 'real-short-1',
+          sourceId: source.id,
+          sourceName: source.name,
+          title: '平台真实作品',
+          poster: 'https://img.example.com/short.jpg',
+          category: MediaCategory.short,
+        ),
+      ],
+      hasMore: false,
+    );
   }
 }

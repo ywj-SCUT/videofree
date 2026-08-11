@@ -69,7 +69,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }).toList();
     await widget.appState.updateSources(next);
     _tikHubToken.clear();
-    _message('抖音与 YouTube Shorts 平台接口已启用');
+    _message('TikTok、抖音与 YouTube Shorts 平台接口已启用');
   }
 
   Future<void> _applyImport(ImportResult result) async {
@@ -249,7 +249,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: '短视频平台 API',
             detail: _tikHubConfigured
                 ? 'TikHub 已配置，TikTok、抖音与 YouTube Shorts 可参与推荐'
-                : 'TikTok 公共推荐默认启用，配置 TikHub 后接入抖音与 YouTube Shorts',
+                : '配置 TikHub 后接入 TikTok、抖音与 YouTube Shorts 的真实作品',
           ),
           const SizedBox(height: 10),
           Row(

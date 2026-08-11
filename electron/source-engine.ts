@@ -115,12 +115,15 @@ export async function aggregateSearch(sources: CmsSource[], query: string, categ
   const started = Date.now();
   const currentPage = Math.max(1, Math.floor(Number(page)) || 1);
   const normalizedQuery = query.trim().toLowerCase();
-  const local = currentPage === 1 ? OPEN_CATALOG.filter((item) => {
+  const local = currentPage === 1 && category !== 'short' ? OPEN_CATALOG.filter((item) => {
     const matchesQuery = !normalizedQuery || `${item.title} ${item.summary ?? ''}`.toLowerCase().includes(normalizedQuery);
     return matchesQuery && (category === 'all' || item.category === category);
   }) : [];
-  const active = sources.filter((source) => source.enabled && source.searchable
-    && (source.type !== 'short-api' || category === 'short'));
+  const active = sources.filter((source) => {
+    if (!source.enabled || !source.searchable) return false;
+    if (category === 'short') return source.type === 'short-api';
+    return source.type !== 'short-api';
+  });
   const settled = await Promise.allSettled(active.map(async (source): Promise<SourceSearchPage> => {
     if (source.type === 'cms') return searchCms(source, query, currentPage);
     if (source.type === 'short-api') return searchShortSource(source, query, currentPage);

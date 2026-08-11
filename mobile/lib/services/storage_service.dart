@@ -11,13 +11,13 @@ class StorageService {
 
   static const _defaultSources = [
     {
-      'id': 'builtin-short-tiktok',
-      'name': 'TikTok 公共推荐',
+      'id': 'builtin-short-tikhub-tiktok',
+      'name': 'TikTok 推荐',
       'type': 'short-api',
-      'api': 'https://www.tikwm.com',
-      'provider': 'tikwm',
+      'api': 'https://api.tikhub.io',
+      'provider': 'tikhub-tiktok',
       'region': 'US',
-      'enabled': true,
+      'enabled': false,
       'searchable': true,
     },
     {

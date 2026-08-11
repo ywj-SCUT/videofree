@@ -99,7 +99,10 @@ class _MainShellState extends State<MainShell> {
     super.initState();
     _pages = [
       SearchScreen(appState: widget.appState),
-      ShortsScreen(appState: widget.appState),
+      ShortsScreen(
+        appState: widget.appState,
+        onOpenSettings: () => setState(() => _index = 3),
+      ),
       LibraryScreen(appState: widget.appState),
       SettingsScreen(appState: widget.appState),
     ];

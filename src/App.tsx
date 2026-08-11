@@ -7,7 +7,7 @@ import {
   KeyRound, LoaderCircle, Maximize2, Minimize2, Minus, MonitorPlay, Pause, Play, Plus, Search,
   Settings, Sparkles, Star, Trash2, Upload, Volume2, VolumeX, X,
 } from 'lucide-react';
-import type { AppSettings, CmsSource, DanmakuProvider, HistoryItem, LibraryState, MediaCategory, MediaItem } from './types';
+import type { AppSettings, CmsSource, DanmakuProvider, HistoryItem, LibraryState, MediaCategory, MediaItem, SearchResponse } from './types';
 
 type View = 'discover' | 'search' | 'shorts' | 'favorites' | 'history' | 'settings';
 
@@ -113,6 +113,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [shortHasMore, setShortHasMore] = useState(false);
+  const [shortFailures, setShortFailures] = useState<SearchResponse['failures']>([]);
   const [searchMeta, setSearchMeta] = useState({ elapsedMs: 0, failures: 0 });
   const [settings, setSettings] = useState<AppSettings>(emptySettings);
   const [library, setLibrary] = useState<LibraryState>(emptyLibrary);
@@ -136,6 +137,7 @@ function App() {
       setItems(response.items);
       setSearchMeta({ elapsedMs: response.elapsedMs, failures: response.failures.length });
       const isShortFeed = nextCategory === 'short' || nextCategory === 'ai-short';
+      setShortFailures(nextCategory === 'short' ? response.failures : []);
       shortFeedRef.current = { mode: nextCategory, page: response.page, hasMore: isShortFeed && response.hasMore };
       setShortHasMore(isShortFeed && response.hasMore);
     } finally {
@@ -163,6 +165,13 @@ function App() {
         hasMore = response.hasMore;
         elapsedMs += response.elapsedMs;
         failures += response.failures.length;
+        if (mode === 'short' && response.failures.length) {
+          setShortFailures((current) => {
+            const merged = new Map(current.map((failure) => [failure.sourceId, failure]));
+            response.failures.forEach((failure) => merged.set(failure.sourceId, failure));
+            return [...merged.values()];
+          });
+        }
         fresh = response.items.filter((item) => !known.has(`${item.sourceId}:${item.id}`));
       }
       if (fresh.length) {
@@ -287,7 +296,7 @@ function App() {
           <SearchView query={query} setQuery={setQuery} category={category} setCategory={setCategory} items={items} loading={loading}
             meta={searchMeta} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} proxyPort={settings.proxyPort} />
         )}
-        {view === 'shorts' && <ShortsView items={items} loading={loading} loadingMore={loadingMore} hasMore={shortHasMore} onLoadMore={() => loadMoreShorts(category)} onOpen={openMedia} onMode={(mode) => { setCategory(mode); void searchMedia('', mode); }} mode={category} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} settings={settings} />}
+        {view === 'shorts' && <ShortsView items={items} failures={shortFailures} loading={loading} loadingMore={loadingMore} hasMore={shortHasMore} onLoadMore={() => loadMoreShorts(category)} onOpen={openMedia} onConfigure={() => navigate('settings')} onMode={(mode) => { setCategory(mode); void searchMedia('', mode); }} mode={category} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} settings={settings} />}
         {view === 'favorites' && <LibraryView mode="favorites" items={library.favorites} onOpen={openMedia} onRemove={toggleFavorite} onClear={() => clearLibrarySection('favorites')} proxyPort={settings.proxyPort} />}
         {view === 'history' && <LibraryView mode="history" items={library.history} onOpen={openMedia} onRemove={removeHistory} onClear={() => clearLibrarySection('history')} proxyPort={settings.proxyPort} />}
         {view === 'settings' && <SettingsView settings={settings} onSettings={setSettings} />}
@@ -459,8 +468,8 @@ function ShortFeedItem({ item, index, settings, favorite, onFavorite, onOpen, on
   </article>;
 }
 
-function ShortsView({ items, loading, loadingMore, hasMore, onLoadMore, onOpen, mode, onMode, favoriteKeys, onFavorite, settings }: {
-  items: MediaItem[]; loading: boolean; loadingMore: boolean; hasMore: boolean; onLoadMore: () => void; onOpen: (item: MediaItem) => void; mode: MediaCategory;
+function ShortsView({ items, failures, loading, loadingMore, hasMore, onLoadMore, onOpen, onConfigure, mode, onMode, favoriteKeys, onFavorite, settings }: {
+  items: MediaItem[]; failures: SearchResponse['failures']; loading: boolean; loadingMore: boolean; hasMore: boolean; onLoadMore: () => void; onOpen: (item: MediaItem) => void; onConfigure: () => void; mode: MediaCategory;
   onMode: (mode: MediaCategory) => void; favoriteKeys: Set<string>; onFavorite: (item: MediaItem) => void; settings: AppSettings;
 }) {
   const handleActive = useCallback((index: number) => {
@@ -472,7 +481,7 @@ function ShortsView({ items, loading, loadingMore, hasMore, onLoadMore, onOpen, 
   }, [hasMore, items.length, loading, loadingMore, onLoadMore]);
 
   return <div className="page shorts-page"><header className="page-header"><div><span className="eyebrow">沉浸浏览</span><h1>短视频</h1></div><div className="segmented-control compact"><button className={mode === 'short' ? 'selected' : ''} onClick={() => onMode('short')}>短视频</button><button className={mode === 'ai-short' ? 'selected' : ''} onClick={() => onMode('ai-short')}>AI 短视频</button></div></header>
-    {loading && !items.length ? <LoadingGrid /> : items.length ? <div className="short-feed">{items.map((item, index) => <ShortFeedItem key={`${item.sourceId}:${item.id}`} item={item} index={index} settings={settings} favorite={favoriteKeys.has(`${item.sourceId}:${item.id}`)} onFavorite={onFavorite} onOpen={onOpen} onActive={handleActive} />)}{loadingMore && <div className="short-feed-loading"><LoaderCircle className="spin" size={18} />正在载入</div>}</div> : <EmptyState icon={Sparkles} title="还没有短视频" text="在设置中启用短视频平台 API 或添加包含短视频分类的点播来源。" />}
+    {loading && !items.length ? <LoadingGrid /> : items.length ? <div className="short-feed">{items.map((item, index) => <ShortFeedItem key={`${item.sourceId}:${item.id}`} item={item} index={index} settings={settings} favorite={favoriteKeys.has(`${item.sourceId}:${item.id}`)} onFavorite={onFavorite} onOpen={onOpen} onActive={handleActive} />)}{loadingMore && <div className="short-feed-loading"><LoaderCircle className="spin" size={18} />正在载入</div>}</div> : <EmptyState icon={Sparkles} title={mode === 'short' ? '平台短视频暂不可用' : '还没有 AI 短视频'} text={mode === 'short' ? (failures.length ? failures.slice(0, 2).map((failure) => `${failure.sourceName}：${failure.message}`).join('；') : '配置 TikHub Bearer Token 后加载 TikTok、抖音与 YouTube Shorts 的真实作品。') : 'AI 短视频是独立分类，不会混入平台短视频推荐。'} action={mode === 'short' ? <button className="primary-button" onClick={onConfigure}><Settings size={16} />配置平台接口</button> : undefined} />}
   </div>;
 }
 
@@ -569,7 +578,7 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
     setTesting(null);
   };
   return <div className="page settings-page"><header className="page-header"><div><span className="eyebrow">本机配置</span><h1>设置</h1></div></header>
-    <section className="settings-section"><div className="settings-heading"><div><h2>短视频平台 API</h2><p>TikTok 公共推荐默认启用；TikHub Token 用于抖音推荐与 YouTube Shorts。</p></div><span className="source-state"><span className={tikHubConfigured ? 'status-dot' : 'status-dot off'} />{tikHubConfigured ? '已配置' : '未配置'}</span></div>
+    <section className="settings-section"><div className="settings-heading"><div><h2>短视频平台 API</h2><p>TikHub Token 用于加载 TikTok、抖音与 YouTube Shorts 的真实平台作品。</p></div><span className="source-state"><span className={tikHubConfigured ? 'status-dot' : 'status-dot off'} />{tikHubConfigured ? '已配置' : '未配置'}</span></div>
       {testResult.tikhub && <div className="inline-notice"><Check size={15} />{testResult.tikhub}</div>}
       <div className="import-url"><div className="field-with-icon"><KeyRound size={16} /><input type="password" value={tikHubToken} onChange={(event) => setTikHubToken(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void saveTikHub(); }} placeholder={tikHubConfigured ? '输入新 Token 进行更新' : 'TikHub Bearer Token'} /></div><button className="primary-button" disabled={!tikHubToken.trim()} onClick={() => void saveTikHub()}><Check size={16} />保存并启用</button></div>
     </section>

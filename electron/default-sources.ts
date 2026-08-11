@@ -2,9 +2,9 @@ import type { CmsSource } from './types.js';
 
 export const DEFAULT_SOURCES: CmsSource[] = [
   {
-    id: 'builtin-short-tiktok', name: 'TikTok 公共推荐', type: 'short-api',
-    api: 'https://www.tikwm.com', provider: 'tikwm', region: 'US',
-    enabled: true, searchable: true,
+    id: 'builtin-short-tikhub-tiktok', name: 'TikTok 推荐', type: 'short-api',
+    api: 'https://api.tikhub.io', provider: 'tikhub-tiktok', region: 'US',
+    enabled: false, searchable: true,
   },
   {
     id: 'builtin-short-douyin', name: '抖音推荐', type: 'short-api',

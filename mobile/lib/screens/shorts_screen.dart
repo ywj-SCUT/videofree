@@ -11,59 +11,6 @@ import '../services/app_state.dart';
 import '../theme/app_theme.dart';
 import 'detail_screen.dart';
 
-const _openShorts = <MediaItem>[
-  MediaItem(
-    id: 'open-tears-of-steel',
-    sourceId: 'open-cinema',
-    sourceName: '开放影院',
-    title: 'Tears of Steel',
-    poster: 'assets/shorts/tears-of-steel.jpg',
-    backdrop: 'assets/shorts/tears-of-steel.jpg',
-    year: '2012',
-    remarks: '科幻短片',
-    category: MediaCategory.short,
-    summary: '真人与视觉特效结合的开放科幻短片。',
-    quality: '1080P',
-    playLines: [
-      PlayLine(
-        name: '高清',
-        episodes: [
-          Episode(
-            name: '正片',
-            url:
-                'https://archive.org/download/Tears-of-Steel/tears_of_steel_1080p.mp4',
-          ),
-        ],
-      ),
-    ],
-  ),
-  MediaItem(
-    id: 'open-ai-workflow-demo',
-    sourceId: 'open-cinema',
-    sourceName: '开放影院',
-    title: 'AI 影像工作流演示',
-    poster: 'assets/shorts/ai-short-demo.jpg',
-    backdrop: 'assets/shorts/ai-short-demo.jpg',
-    year: '2025',
-    remarks: 'AI 短视频示例',
-    category: MediaCategory.aiShort,
-    summary: '用于验证 AI 短视频分类、竖向浏览和播放链路的开放素材。',
-    quality: '1080P',
-    playLines: [
-      PlayLine(
-        name: '演示',
-        episodes: [
-          Episode(
-            name: '正片',
-            url:
-                'https://archive.org/download/springopenmovie/springopenmovie.mp4',
-          ),
-        ],
-      ),
-    ],
-  ),
-];
-
 class _ResolvedShort {
   final String url;
   final Map<String, String>? headers;
@@ -72,8 +19,13 @@ class _ResolvedShort {
 
 class ShortsScreen extends StatefulWidget {
   final AppState appState;
+  final VoidCallback onOpenSettings;
 
-  const ShortsScreen({super.key, required this.appState});
+  const ShortsScreen({
+    super.key,
+    required this.appState,
+    required this.onOpenSettings,
+  });
 
   @override
   State<ShortsScreen> createState() => _ShortsScreenState();
@@ -88,16 +40,20 @@ class _ShortsScreenState extends State<ShortsScreen>
   StreamSubscription<bool>? _bufferingSubscription;
   StreamSubscription<String>? _errorSubscription;
 
-  List<MediaItem> _items = [..._openShorts];
+  List<MediaItem> _items = [];
+  List<SourceFailure> _failures = [];
   int _currentIndex = 0;
+  int _feedRequestId = 0;
   int _requestId = 0;
   bool _playing = false;
-  bool _buffering = true;
+  bool _buffering = false;
   bool _refreshing = false;
   bool _loadingMore = false;
   bool _hasMore = true;
   int _page = 1;
   String? _error;
+  String? _feedError;
+  late String _sourceSignature;
   final Map<String, _ResolvedShort> _resolved = {};
   final Map<String, Future<_ResolvedShort>> _resolving = {};
 
@@ -107,6 +63,8 @@ class _ShortsScreenState extends State<ShortsScreen>
     WidgetsBinding.instance.addObserver(this);
     _player = Player();
     _videoController = VideoController(_player);
+    _sourceSignature = _shortSourceSignature();
+    widget.appState.addListener(_handleAppStateChanged);
     _player.setPlaylistMode(PlaylistMode.single);
     _playingSubscription = _player.stream.playing.listen((value) {
       if (mounted) setState(() => _playing = value);
@@ -117,9 +75,27 @@ class _ShortsScreenState extends State<ShortsScreen>
     _errorSubscription = _player.stream.error.listen((value) {
       if (mounted && value.isNotEmpty) setState(() => _error = value);
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _activate(0));
     unawaited(_refreshFeed());
   }
+
+  String _shortSourceSignature() => widget.appState.sources
+      .where((source) => source.type == 'short-api')
+      .map(
+        (source) =>
+            '${source.id}|${source.enabled}|${source.searchable}|${source.provider}|${source.headers?['Authorization'] ?? ''}',
+      )
+      .join(';');
+
+  void _handleAppStateChanged() {
+    final next = _shortSourceSignature();
+    if (next == _sourceSignature) return;
+    _sourceSignature = next;
+    unawaited(_refreshFeed());
+  }
+
+  bool _isPlatformItem(MediaItem item) => widget.appState.sources.any(
+    (source) => source.id == item.sourceId && source.type == 'short-api',
+  );
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -132,6 +108,7 @@ class _ShortsScreenState extends State<ShortsScreen>
     _playingSubscription?.cancel();
     _bufferingSubscription?.cancel();
     _errorSubscription?.cancel();
+    widget.appState.removeListener(_handleAppStateChanged);
     _pageController.dispose();
     _player.dispose();
     super.dispose();
@@ -139,43 +116,53 @@ class _ShortsScreenState extends State<ShortsScreen>
 
   Future<void> _refreshFeed() async {
     if (_refreshing) return;
-    setState(() => _refreshing = true);
+    final feedRequestId = ++_feedRequestId;
+    await _player.stop();
+    setState(() {
+      _refreshing = true;
+      _playing = false;
+      _buffering = false;
+      _error = null;
+      _feedError = null;
+    });
     try {
-      final responses = await Future.wait([
-        widget.appState.engine.search(
-          '',
-          MediaCategory.short,
-          widget.appState.sources,
-          1,
-        ),
-        widget.appState.engine.search(
-          '',
-          MediaCategory.aiShort,
-          widget.appState.sources,
-          1,
-        ),
-      ]);
-      if (!mounted) return;
+      final response = await widget.appState.engine.search(
+        '',
+        MediaCategory.short,
+        widget.appState.sources,
+        1,
+      );
+      if (!mounted || feedRequestId != _feedRequestId) return;
       final byId = <String, MediaItem>{};
-      for (final item in responses.expand((response) => response.items)) {
+      for (final item in response.items.where(_isPlatformItem)) {
         byId['${item.sourceId}:${item.id}'] = item;
-      }
-      for (final item in _openShorts) {
-        byId.putIfAbsent('${item.sourceId}:${item.id}', () => item);
       }
       _resolved.clear();
       _resolving.clear();
       setState(() {
         _items = byId.values.toList();
+        _failures = response.failures;
         _page = 1;
-        _hasMore = responses.any((response) => response.hasMore);
+        _hasMore = response.hasMore && _items.isNotEmpty;
         _currentIndex = 0;
       });
       if (_pageController.hasClients) _pageController.jumpToPage(0);
-      await _activate(0);
-      _precacheNeighbors(_currentIndex);
+      if (_items.isNotEmpty) {
+        await _activate(0);
+        _precacheNeighbors(_currentIndex);
+      }
+    } catch (error) {
+      if (!mounted || feedRequestId != _feedRequestId) return;
+      setState(() {
+        _items = [];
+        _failures = [];
+        _hasMore = false;
+        _feedError = error.toString().replaceFirst('Exception: ', '');
+      });
     } finally {
-      if (mounted) setState(() => _refreshing = false);
+      if (mounted && feedRequestId == _feedRequestId) {
+        setState(() => _refreshing = false);
+      }
     }
   }
 
@@ -193,23 +180,20 @@ class _ShortsScreenState extends State<ShortsScreen>
         attempt++
       ) {
         nextPage++;
-        final responses = await Future.wait([
-          widget.appState.engine.search(
-            '',
-            MediaCategory.short,
-            widget.appState.sources,
-            nextPage,
-          ),
-          widget.appState.engine.search(
-            '',
-            MediaCategory.aiShort,
-            widget.appState.sources,
-            nextPage,
-          ),
-        ]);
-        hasMore = responses.any((response) => response.hasMore);
-        for (final item in responses.expand((response) => response.items)) {
+        final response = await widget.appState.engine.search(
+          '',
+          MediaCategory.short,
+          widget.appState.sources,
+          nextPage,
+        );
+        hasMore = response.hasMore;
+        for (final item in response.items.where(_isPlatformItem)) {
           if (known.add('${item.sourceId}:${item.id}')) fresh.add(item);
+        }
+        for (final failure in response.failures) {
+          if (!_failures.any((value) => value.sourceId == failure.sourceId)) {
+            _failures.add(failure);
+          }
         }
       }
       if (!mounted) return;
@@ -353,36 +337,72 @@ class _ShortsScreenState extends State<ShortsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final enabledPlatforms = widget.appState.sources.where(
+      (source) =>
+          source.type == 'short-api' && source.enabled && source.searchable,
+    );
+    final hasConfiguredPlatform = enabledPlatforms.any(
+      (source) => RegExp(
+        r'^Bearer\s+\S+',
+        caseSensitive: false,
+      ).hasMatch(source.headers?['Authorization'] ?? ''),
+    );
+    final failureText =
+        _feedError ??
+        (_failures.isEmpty
+            ? null
+            : _failures
+                  .take(2)
+                  .map((failure) => '${failure.sourceName}：${failure.message}')
+                  .join('\n'));
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
+        fit: StackFit.expand,
         children: [
-          PageView.builder(
-            controller: _pageController,
-            scrollDirection: Axis.vertical,
-            itemCount: _items.length,
-            onPageChanged: (index) {
-              HapticFeedback.selectionClick();
-              unawaited(_activate(index));
-              if (index >= _items.length - 3) unawaited(_loadMore());
-            },
-            itemBuilder: (context, index) => _ShortPage(
-              item: _items[index],
-              index: index,
-              active: index == _currentIndex,
-              player: _videoController,
-              playing: _playing,
-              buffering: _buffering,
-              error: _error,
-              favorite: widget.appState.isFavorite(
-                _items[index].sourceId,
-                _items[index].id,
+          if (_items.isNotEmpty)
+            PageView.builder(
+              controller: _pageController,
+              scrollDirection: Axis.vertical,
+              itemCount: _items.length,
+              onPageChanged: (index) {
+                HapticFeedback.selectionClick();
+                unawaited(_activate(index));
+                if (index >= _items.length - 3) unawaited(_loadMore());
+              },
+              itemBuilder: (context, index) => _ShortPage(
+                item: _items[index],
+                index: index,
+                active: index == _currentIndex,
+                player: _videoController,
+                playing: _playing,
+                buffering: _buffering,
+                error: _error,
+                favorite: widget.appState.isFavorite(
+                  _items[index].sourceId,
+                  _items[index].id,
+                ),
+                onTogglePlayback: _togglePlayback,
+                onFavorite: () => _toggleFavorite(_items[index]),
+                onDetail: () => _openDetail(_items[index]),
               ),
-              onTogglePlayback: _togglePlayback,
-              onFavorite: () => _toggleFavorite(_items[index]),
-              onDetail: () => _openDetail(_items[index]),
+            )
+          else
+            ColoredBox(
+              color: Colors.black,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(28, 110, 28, 118),
+                child: Center(
+                  child: _ShortsEmptyState(
+                    loading: _refreshing,
+                    hasConfiguredPlatform: hasConfiguredPlatform,
+                    failureText: failureText,
+                    onRefresh: _refreshFeed,
+                    onOpenSettings: widget.onOpenSettings,
+                  ),
+                ),
+              ),
             ),
-          ),
           if (_loadingMore)
             const Positioned(
               left: 0,
@@ -413,26 +433,32 @@ class _ShortsScreenState extends State<ShortsScreen>
             ),
           SafeArea(
             bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 12, 0),
-              child: Row(
-                children: [
-                  const Text(
-                    '短视频',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-                  ),
-                  const Spacer(),
-                  IconButton.filledTonal(
-                    tooltip: '刷新短视频',
-                    onPressed: _refreshing ? null : _refreshFeed,
-                    icon: _refreshing
-                        ? const SizedBox.square(
-                            dimension: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh_rounded),
-                  ),
-                ],
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 12, 0),
+                child: Row(
+                  children: [
+                    const Text(
+                      '短视频',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton.filledTonal(
+                      tooltip: '刷新短视频',
+                      onPressed: _refreshing ? null : _refreshFeed,
+                      icon: _refreshing
+                          ? const SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh_rounded),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -613,6 +639,79 @@ class _ShortPage extends StatelessWidget {
             ],
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _ShortsEmptyState extends StatelessWidget {
+  final bool loading;
+  final bool hasConfiguredPlatform;
+  final String? failureText;
+  final VoidCallback onRefresh;
+  final VoidCallback onOpenSettings;
+
+  const _ShortsEmptyState({
+    required this.loading,
+    required this.hasConfiguredPlatform,
+    required this.failureText,
+    required this.onRefresh,
+    required this.onOpenSettings,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('正在连接短视频平台'),
+        ],
+      );
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(
+          Icons.smart_display_outlined,
+          size: 58,
+          color: AppColors.secondary,
+        ),
+        const SizedBox(height: 18),
+        Text(
+          hasConfiguredPlatform ? '平台短视频加载失败' : '还没有配置短视频平台',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          failureText ??
+              '在设置中填写 TikHub Bearer Token，即可加载 TikTok、抖音与 YouTube Shorts 的真实作品。',
+          textAlign: TextAlign.center,
+          maxLines: 5,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Color(0xFFB8C0C5), height: 1.5),
+        ),
+        const SizedBox(height: 20),
+        FilledButton.icon(
+          onPressed: onOpenSettings,
+          icon: const Icon(Icons.tune_rounded),
+          label: const Text('配置平台接口'),
+        ),
+        if (hasConfiguredPlatform) ...[
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: onRefresh,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('重新加载'),
+          ),
+        ],
       ],
     );
   }

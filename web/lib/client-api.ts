@@ -8,7 +8,7 @@ import type {
 const SETTINGS_KEY = 'videoget.settings.v1';
 const LIBRARY_KEY = 'videoget.library.v1';
 const defaultSources: CmsSource[] = [
-  { id: 'builtin-short-tiktok', name: 'TikTok 公共推荐', type: 'short-api', api: 'https://www.tikwm.com', provider: 'tikwm', region: 'US', enabled: true, searchable: true },
+  { id: 'builtin-short-tikhub-tiktok', name: 'TikTok 推荐', type: 'short-api', api: 'https://api.tikhub.io', provider: 'tikhub-tiktok', region: 'US', enabled: false, searchable: true },
   { id: 'builtin-short-douyin', name: '抖音推荐', type: 'short-api', api: 'https://api.tikhub.io', provider: 'tikhub-douyin', region: 'CN', enabled: false, searchable: true },
   { id: 'builtin-short-youtube', name: 'YouTube Shorts', type: 'short-api', api: 'https://api.tikhub.io', provider: 'tikhub-youtube', region: 'CN', enabled: false, searchable: true },
   { id: 'builtin-line-a', name: '默认线路 A', type: 'cms', api: 'https://caiji.moduapi.cc/api.php/provide/vod/', enabled: true, searchable: true },
