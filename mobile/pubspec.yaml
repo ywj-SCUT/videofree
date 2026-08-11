@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   dio: ^5.11.0
   shared_preferences: ^2.5.5
   cached_network_image: ^3.4.1

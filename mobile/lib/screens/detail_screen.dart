@@ -102,8 +102,10 @@ class _DetailScreenState extends State<DetailScreen> {
     );
 
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        backgroundColor: Colors.transparent,
+        systemOverlayStyle: SystemUiOverlayStyle.light,
         actions: [
           IconButton(
             tooltip: isFavorite ? '取消收藏' : '收藏',
@@ -162,12 +164,19 @@ class _DetailScreenState extends State<DetailScreen> {
     final backdropUrl = resolveMediaUrl(
       item.backdrop?.isNotEmpty == true ? item.backdrop! : item.poster,
     );
+    final heroHeight = (MediaQuery.sizeOf(context).height * .58)
+        .clamp(440.0, 560.0)
+        .toDouble();
+    final isFavorite = widget.appState.isFavorite(
+      widget.item.sourceId,
+      widget.item.id,
+    );
     return ListView(
       key: const ValueKey('content'),
       padding: const EdgeInsets.only(bottom: 34),
       children: [
         SizedBox(
-          height: 360,
+          height: heroHeight,
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -184,13 +193,17 @@ class _DetailScreenState extends State<DetailScreen> {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Color(0x220B0D10), Color(0xF50B0D10)],
-                    stops: [0.18, 1],
+                    colors: [
+                      Color(0x770B0D10),
+                      Color(0x220B0D10),
+                      Color(0xFF0B0D10),
+                    ],
+                    stops: [0, .34, 1],
                   ),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(18, 44, 18, 22),
+                padding: const EdgeInsets.fromLTRB(18, 92, 18, 24),
                 child: Align(
                   alignment: Alignment.bottomLeft,
                   child: Row(
@@ -199,8 +212,8 @@ class _DetailScreenState extends State<DetailScreen> {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(12),
                         child: SizedBox(
-                          width: 118,
-                          height: 168,
+                          width: 108,
+                          height: 162,
                           child: posterUrl.isEmpty
                               ? const _DetailPosterFallback()
                               : CachedNetworkImage(
@@ -221,10 +234,10 @@ class _DetailScreenState extends State<DetailScreen> {
                           children: [
                             Text(
                               item.title,
-                              maxLines: 3,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 28,
+                                fontSize: 29,
                                 height: 1.08,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -243,6 +256,19 @@ class _DetailScreenState extends State<DetailScreen> {
                               ],
                             ),
                             const SizedBox(height: 9),
+                            if (item.summary?.isNotEmpty == true) ...[
+                              Text(
+                                item.summary!,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontSize: 12,
+                                  height: 1.45,
+                                ),
+                              ),
+                              const SizedBox(height: 9),
+                            ],
                             Text(
                               '$sourceCount 个来源 · ${item.sourceName}',
                               maxLines: 2,
@@ -252,6 +278,37 @@ class _DetailScreenState extends State<DetailScreen> {
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
                               ),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: FilledButton.icon(
+                                    onPressed: lines.isEmpty ? null : _play,
+                                    icon: const Icon(Icons.play_arrow_rounded),
+                                    label: Text(
+                                      lines.isEmpty
+                                          ? '暂无线路'
+                                          : '播放 ${_currentEpisodeName(lines)}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                IconButton.filledTonal(
+                                  tooltip: isFavorite ? '取消收藏' : '收藏',
+                                  onPressed: _toggleFavorite,
+                                  icon: Icon(
+                                    isFavorite
+                                        ? Icons.favorite_rounded
+                                        : Icons.favorite_border_rounded,
+                                    color: isFavorite
+                                        ? theme.colorScheme.primary
+                                        : null,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -263,20 +320,9 @@ class _DetailScreenState extends State<DetailScreen> {
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-          child: FilledButton.icon(
-            onPressed: lines.isEmpty ? null : _play,
-            icon: const Icon(Icons.play_arrow_rounded),
-            label: Text(
-              lines.isEmpty ? '暂无可播放线路' : '播放 ${_currentEpisodeName(lines)}',
-            ),
-          ),
-        ),
-        SizedBox(height: 2),
         if (item.summary?.isNotEmpty == true) ...[
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 26, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:media_kit/media_kit.dart';
@@ -40,6 +41,9 @@ class _VideoGetAppState extends State<VideoGetApp> {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark(),
       themeMode: ThemeMode.dark,
+      locale: const Locale('zh', 'CN'),
+      supportedLocales: const [Locale('zh', 'CN')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       home: FutureBuilder<void>(
         future: _initialize,
         builder: (context, snapshot) {
@@ -98,7 +102,10 @@ class _MainShellState extends State<MainShell> {
   void initState() {
     super.initState();
     _pages = [
-      SearchScreen(appState: widget.appState),
+      SearchScreen(
+        appState: widget.appState,
+        onOpenLibrary: () => setState(() => _index = 2),
+      ),
       ShortsScreen(
         appState: widget.appState,
         onOpenSettings: () => setState(() => _index = 3),
@@ -133,9 +140,9 @@ class _MainShellState extends State<MainShell> {
               },
               destinations: const [
                 NavigationDestination(
-                  icon: Icon(Icons.search_rounded),
-                  selectedIcon: Icon(Icons.search_rounded),
-                  label: '搜索',
+                  icon: Icon(Icons.grid_view_outlined),
+                  selectedIcon: Icon(Icons.grid_view_rounded),
+                  label: '片库',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.smart_display_outlined),
@@ -145,7 +152,7 @@ class _MainShellState extends State<MainShell> {
                 NavigationDestination(
                   icon: Icon(Icons.video_library_outlined),
                   selectedIcon: Icon(Icons.video_library_rounded),
-                  label: '片库',
+                  label: '收藏',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.tune_outlined),

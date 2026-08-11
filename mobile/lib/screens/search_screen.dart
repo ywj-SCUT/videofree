@@ -9,9 +9,24 @@ import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import 'detail_screen.dart';
 
+enum _LibrarySort { recent, year, title }
+
+extension on _LibrarySort {
+  String get label => switch (this) {
+    _LibrarySort.recent => '聚合顺序',
+    _LibrarySort.year => '年份从新到旧',
+    _LibrarySort.title => '片名排序',
+  };
+}
+
 class SearchScreen extends StatefulWidget {
   final AppState appState;
-  const SearchScreen({super.key, required this.appState});
+  final VoidCallback onOpenLibrary;
+  const SearchScreen({
+    super.key,
+    required this.appState,
+    required this.onOpenLibrary,
+  });
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -24,6 +39,8 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _loading = false;
   String _elapsed = '';
   MediaCategory _category = MediaCategory.all;
+  String _sourceId = 'all';
+  _LibrarySort _sort = _LibrarySort.recent;
 
   @override
   void initState() {
@@ -87,6 +104,46 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  List<MediaItem> get _visibleResults {
+    final visible = _results
+        .where((item) => _sourceId == 'all' || item.sourceId == _sourceId)
+        .toList();
+    switch (_sort) {
+      case _LibrarySort.recent:
+        return visible;
+      case _LibrarySort.year:
+        visible.sort(
+          (a, b) => (int.tryParse(b.year ?? '') ?? 0).compareTo(
+            int.tryParse(a.year ?? '') ?? 0,
+          ),
+        );
+      case _LibrarySort.title:
+        visible.sort((a, b) => a.title.compareTo(b.title));
+    }
+    return visible;
+  }
+
+  List<MapEntry<String, String>> get _availableSources {
+    final sources = <String, String>{};
+    for (final item in _results) {
+      sources[item.sourceId] = item.sourceName;
+    }
+    return sources.entries.toList();
+  }
+
+  String get _selectedSourceName {
+    if (_sourceId == 'all') return '全部片库';
+    for (final source in _availableSources) {
+      if (source.key == _sourceId) return source.value;
+    }
+    return '全部片库';
+  }
+
+  Future<void> _toggleFavorite(MediaItem item) async {
+    await widget.appState.toggleFavorite(item);
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -97,7 +154,7 @@ class _SearchScreenState extends State<SearchScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               child: Row(
                 children: [
                   SvgPicture.asset(
@@ -111,7 +168,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '今晚看什么',
+                          '本地优先 · 多源聚合',
                           style: TextStyle(
                             color: AppColors.secondary,
                             fontSize: 12,
@@ -120,14 +177,14 @@ class _SearchScreenState extends State<SearchScreen> {
                           ),
                         ),
                         Text(
-                          '发现好内容',
+                          '媒体库',
                           style: TextStyle(
-                            fontSize: 21,
+                            fontSize: 24,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
                         Text(
-                          '全源聚合 · 本地优先',
+                          '浏览、筛选并打开影视内容',
                           style: TextStyle(
                             color: Color(0xFFAAA4AB),
                             fontSize: 12,
@@ -192,47 +249,87 @@ class _SearchScreenState extends State<SearchScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             SizedBox(
-              height: 40,
+              height: 44,
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: MediaCategory.values
-                    .map(
-                      (category) => Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: FilterChip(
-                          label: Text(category.label),
-                          selected: category == _category,
-                          showCheckmark: category == _category,
-                          onSelected: (_) => _selectCategory(category),
+                children: [
+                  PopupMenuButton<String>(
+                    tooltip: '选择片库',
+                    onSelected: (value) => setState(() => _sourceId = value),
+                    itemBuilder: (context) => [
+                      CheckedPopupMenuItem(
+                        value: 'all',
+                        checked: _sourceId == 'all',
+                        child: const Text('全部来源'),
+                      ),
+                      ..._availableSources.map(
+                        (source) => CheckedPopupMenuItem(
+                          value: source.key,
+                          checked: _sourceId == source.key,
+                          child: Text(source.value),
                         ),
                       ),
-                    )
-                    .toList(),
+                    ],
+                    child: _LibraryFilterButton(
+                      icon: Icons.video_library_outlined,
+                      label: _selectedSourceName,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  PopupMenuButton<MediaCategory>(
+                    tooltip: '选择类型',
+                    onSelected: _selectCategory,
+                    itemBuilder: (context) => MediaCategory.values
+                        .map(
+                          (category) => CheckedPopupMenuItem(
+                            value: category,
+                            checked: category == _category,
+                            child: Text(category.label),
+                          ),
+                        )
+                        .toList(),
+                    child: _LibraryFilterButton(
+                      icon: Icons.filter_alt_outlined,
+                      label: _category.label,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ActionChip(
+                    avatar: const Icon(Icons.favorite_border_rounded, size: 18),
+                    label: Text('收藏 ${widget.appState.favorites.length}'),
+                    onPressed: widget.onOpenLibrary,
+                  ),
+                  const SizedBox(width: 8),
+                  PopupMenuButton<_LibrarySort>(
+                    tooltip: '选择排序方式',
+                    onSelected: (value) => setState(() => _sort = value),
+                    itemBuilder: (context) => _LibrarySort.values
+                        .map(
+                          (sort) => CheckedPopupMenuItem(
+                            value: sort,
+                            checked: sort == _sort,
+                            child: Text(sort.label),
+                          ),
+                        )
+                        .toList(),
+                    child: _LibraryFilterButton(
+                      icon: Icons.swap_vert_rounded,
+                      label: _sort.label,
+                    ),
+                  ),
+                ],
               ),
             ),
-            if (_results.isNotEmpty && _controller.text.trim().isEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: _MobileFeaturedBanner(
-                  item: _results.first,
-                  imageUrl: resolveMediaUrl(
-                    _results.first.backdrop?.isNotEmpty == true
-                        ? _results.first.backdrop!
-                        : _results.first.poster,
-                  ),
-                  onTap: () => _openDetail(_results.first),
-                ),
-              ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
                   Text(
-                    '${_results.length} 个结果',
+                    '${_visibleResults.length} 部作品',
                     style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -281,6 +378,15 @@ class _SearchScreenState extends State<SearchScreen> {
       );
     }
 
+    final visibleResults = _visibleResults;
+    if (visibleResults.isEmpty) {
+      return const EmptyState(
+        icon: Icons.filter_alt_off_rounded,
+        title: '当前筛选没有内容',
+        detail: '切换片库、类型或排序方式后再试',
+      );
+    }
+
     return GridView.builder(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 108),
@@ -290,13 +396,15 @@ class _SearchScreenState extends State<SearchScreen> {
         crossAxisSpacing: 10,
         mainAxisSpacing: 12,
       ),
-      itemCount: _results.length,
+      itemCount: visibleResults.length,
       itemBuilder: (context, index) {
-        final item = _results[index];
+        final item = visibleResults[index];
         return _MediaCard(
           item: item,
           imageUrl: resolveMediaUrl(item.poster),
           onTap: () => _openDetail(item),
+          isFavorite: widget.appState.isFavorite(item.sourceId, item.id),
+          onFavorite: () => _toggleFavorite(item),
         );
       },
     );
@@ -307,11 +415,15 @@ class _MediaCard extends StatelessWidget {
   final MediaItem item;
   final String imageUrl;
   final VoidCallback onTap;
+  final bool isFavorite;
+  final VoidCallback onFavorite;
 
   const _MediaCard({
     required this.item,
     required this.imageUrl,
     required this.onTap,
+    required this.isFavorite,
+    required this.onFavorite,
   });
 
   @override
@@ -379,6 +491,28 @@ class _MediaCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                Positioned(
+                  left: 7,
+                  bottom: 7,
+                  child: IconButton.filledTonal(
+                    tooltip: isFavorite ? '取消收藏' : '收藏',
+                    visualDensity: VisualDensity.compact,
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size(36, 36),
+                      backgroundColor: const Color(0xD90B0D10),
+                      foregroundColor: isFavorite
+                          ? AppColors.primary
+                          : Colors.white,
+                    ),
+                    onPressed: onFavorite,
+                    icon: Icon(
+                      isFavorite
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      size: 19,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -423,91 +557,42 @@ class _PosterFallback extends StatelessWidget {
   }
 }
 
-class _MobileFeaturedBanner extends StatelessWidget {
-  final MediaItem item;
-  final String imageUrl;
-  final VoidCallback onTap;
+class _LibraryFilterButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
 
-  const _MobileFeaturedBanner({
-    required this.item,
-    required this.imageUrl,
-    required this.onTap,
-  });
+  const _LibraryFilterButton({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return PressableScale(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      semanticLabel: item.title,
-      child: SizedBox(
-        height: 172,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0x22343F48)),
-            image: imageUrl.isEmpty
-                ? null
-                : DecorationImage(
-                    image: CachedNetworkImageProvider(imageUrl),
-                    fit: BoxFit.cover,
-                  ),
-            gradient: const LinearGradient(
-              begin: Alignment.topRight,
-              end: Alignment.bottomLeft,
-              colors: [Color(0xFF22312F), Color(0xFF11151A)],
-            ),
-          ),
-          child: DecoratedBox(
-            decoration: const BoxDecoration(
-              borderRadius: BorderRadius.all(Radius.circular(16)),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0x110B0D10), Color(0xE80B0D10)],
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18),
+            const SizedBox(width: 7),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 118),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  const Text(
-                    '开放影院精选',
-                    style: TextStyle(
-                      color: AppColors.secondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    item.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    [item.year, item.quality, item.remarks]
-                        .whereType<String>()
-                        .where((value) => value.isNotEmpty)
-                        .join('  ·  '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+            const SizedBox(width: 3),
+            const Icon(Icons.expand_more_rounded, size: 17),
+          ],
         ),
       ),
     );
