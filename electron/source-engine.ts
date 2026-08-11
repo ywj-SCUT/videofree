@@ -1,7 +1,7 @@
 import { fetchRemoteText } from './net-client.js';
 import { OPEN_CATALOG } from './open-catalog.js';
 import { detailRule, resolveRulePlayback, searchRule, testRule } from './rule-engine.js';
-import type { CmsSource, LiveChannel, MediaCategory, MediaItem, MediaVariant, PlaybackResolution, PlayLine, SearchResponse } from './types.js';
+import type { CmsSource, MediaCategory, MediaItem, MediaVariant, PlaybackResolution, PlayLine, SearchResponse } from './types.js';
 
 const requestHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
@@ -217,10 +217,8 @@ export async function testSource(source: CmsSource): Promise<{ ok: boolean; late
   }
 }
 
-export interface LivePlaylistReference { id: string; name: string; url: string }
-
-export function importTvBox(input: unknown): { sources: CmsSource[]; lives: LiveChannel[]; livePlaylists: LivePlaylistReference[] } {
-  const config = input as { sites?: Array<Record<string, unknown>>; lives?: Array<Record<string, unknown>> };
+export function importTvBox(input: unknown): { sources: CmsSource[] } {
+  const config = input as { sites?: Array<Record<string, unknown>> };
   const sources = (config.sites ?? []).flatMap((site, index): CmsSource[] => {
     const type = Number(site.type ?? 1);
     const api = String(site.api ?? '');
@@ -247,24 +245,5 @@ export function importTvBox(input: unknown): { sources: CmsSource[]; lives: Live
     }
     return [];
   });
-  const lives: LiveChannel[] = [];
-  const livePlaylists: LivePlaylistReference[] = [];
-  (config.lives ?? []).forEach((live, index) => {
-    const sourceId = String(live.key ?? `tvbox-live-${index}`);
-    const sourceName = String(live.name ?? `直播源 ${index + 1}`);
-    const url = String(live.url ?? '');
-    if (/^https?:\/\//i.test(url)) livePlaylists.push({ id: sourceId, name: sourceName, url });
-    const channels = Array.isArray(live.channels) ? live.channels as Array<Record<string, unknown>> : [];
-    channels.forEach((channel, channelIndex) => {
-      const channelUrl = String(channel.url ?? '');
-      if (!/^https?:\/\//i.test(channelUrl)) return;
-      const name = String(channel.name ?? `频道 ${channelIndex + 1}`);
-      lives.push({
-        id: `${sourceId}-${channelIndex}`, sourceId, sourceName, name,
-        group: String(channel.group ?? sourceName), url: channelUrl,
-        urls: [channelUrl], logo: String(channel.logo ?? '') || undefined,
-      });
-    });
-  });
-  return { sources, lives, livePlaylists };
+  return { sources };
 }

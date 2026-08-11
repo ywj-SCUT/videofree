@@ -52,24 +52,11 @@ void main() {
     expect(videoTrackLabel(tracks[1]), contains('1080P'));
   });
 
-  test('relative media URLs resolve against the configured server', () {
-    const server = 'http://127.0.0.1:3000';
-
+  test('media URLs are consumed directly by the local engine', () {
+    expect(resolveMediaUrl('posters/sintel.jpg'), 'posters/sintel.jpg');
     expect(
-      resolveMediaUrl(server, 'posters/sintel.jpg'),
-      'http://127.0.0.1:3000/posters/sintel.jpg',
-    );
-    expect(
-      resolveMediaUrl(server, '/posters/sintel.jpg'),
-      'http://127.0.0.1:3000/posters/sintel.jpg',
-    );
-    expect(
-      resolveMediaUrl(server, 'https://images.example/sintel.jpg'),
+      resolveMediaUrl('https://images.example/sintel.jpg'),
       'https://images.example/sintel.jpg',
-    );
-    expect(
-      resolveMediaUrl('not-a-url', 'posters/sintel.jpg'),
-      'posters/sintel.jpg',
     );
   });
 }

@@ -2,13 +2,11 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { aggregateSearch, getDetail, importTvBox, resolveMedia, resolvePlayback, testSource } from './source-engine.js';
-import { mergeLiveChannels, parseLivePlaylist } from './live-engine.js';
-import { fetchIptvCatalog } from './iptv-catalog.js';
 import { aggregateDanmaku } from './danmaku-engine.js';
 import { fetchRemoteText } from './net-client.js';
 import { startProxyServer } from './proxy-server.js';
 import { Storage } from './storage.js';
-import type { CmsSource, ImportResult, LibraryState, LiveChannel, MediaCategory } from './types.js';
+import type { CmsSource, ImportResult, LibraryState, MediaCategory } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isAutomationRun = process.argv.some((argument) => argument.startsWith('--remote-debugging-port='));
@@ -27,73 +25,21 @@ async function applyTvBoxImport(config: unknown): Promise<ImportResult> {
   const settings = storage.getSettings(proxy?.port ?? 0);
   const sourcesById = new Map(settings.sources.map((source) => [source.id, source]));
   imported.sources.forEach((source) => sourcesById.set(source.id, source));
-  const incomingLives = [...imported.lives];
-  const failures: string[] = [];
-
-  for (const playlist of imported.livePlaylists) {
-    try {
-      const content = await fetchRemoteText(playlist.url);
-      const channels = parseLivePlaylist(content, playlist.id, playlist.name);
-      if (channels.length) incomingLives.push(...channels);
-      else if (/\.m3u8(?:$|\?)/i.test(playlist.url)) {
-        incomingLives.push({
-          id: `${playlist.id}-direct`, sourceId: playlist.id, sourceName: playlist.name,
-          name: playlist.name, group: playlist.name, url: playlist.url, urls: [playlist.url],
-        });
-      } else failures.push(`${playlist.name}: 播放列表中没有频道`);
-    } catch (error) {
-      failures.push(`${playlist.name}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  const liveChannels = mergeLiveChannels(settings.liveChannels, incomingLives);
-  await storage.updateSettings({ sources: [...sourcesById.values()], liveChannels });
+  await storage.updateSettings({ sources: [...sourcesById.values()] });
   return {
     importedSources: imported.sources.length,
-    importedLives: liveChannels.length - settings.liveChannels.length,
-    failures,
+    failures: [],
     settings: storage.getSettings(proxy?.port ?? 0),
   };
 }
 
-async function applyImportedContent(content: string, name: string, originUrl?: string): Promise<ImportResult> {
+async function applyImportedContent(content: string): Promise<ImportResult> {
   const trimmed = content.trim();
   if (!trimmed) throw new Error('导入内容为空');
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     return applyTvBoxImport(JSON.parse(trimmed));
   }
-  const sourceId = `playlist-${Buffer.from(name).toString('base64url').slice(0, 32) || Date.now()}`;
-  let channels = parseLivePlaylist(trimmed, sourceId, name || '导入直播');
-  if (!channels.length && originUrl && /\.m3u8(?:$|\?)/i.test(originUrl)) {
-    channels = [{
-      id: `${sourceId}-direct`, sourceId, sourceName: name,
-      name, group: name, url: originUrl, urls: [originUrl],
-    }];
-  }
-  if (!channels.length) throw new Error('未识别到 TVBox 配置或直播频道');
-  const settings = storage.getSettings(proxy?.port ?? 0);
-  const liveChannels = mergeLiveChannels(settings.liveChannels, channels);
-  await storage.updateSettings({ liveChannels });
-  return {
-    importedSources: 0,
-    importedLives: liveChannels.length - settings.liveChannels.length,
-    failures: [],
-    settings: storage.getSettings(proxy?.port ?? 0),
-  };
-}
-
-async function applyIptvCatalog(): Promise<ImportResult> {
-  const incoming = await fetchIptvCatalog();
-  if (!incoming.length) throw new Error('公开 IPTV 目录没有返回可用频道');
-  const settings = storage.getSettings(proxy?.port ?? 0);
-  const liveChannels = mergeLiveChannels(settings.liveChannels, incoming);
-  await storage.updateSettings({ liveChannels });
-  return {
-    importedSources: 0,
-    importedLives: liveChannels.length - settings.liveChannels.length,
-    failures: [],
-    settings: storage.getSettings(proxy?.port ?? 0),
-  };
+  throw new Error('仅支持 JSON 格式的 TVBox 点播配置');
 }
 
 function createWindow(): void {
@@ -147,14 +93,11 @@ function registerIpc(): void {
     return storage.getSettings(proxy?.port ?? 0);
   });
   ipcMain.handle('settings:import-tvbox', (_event, config: unknown) => applyTvBoxImport(config));
-  ipcMain.handle('settings:import-content', (_event, content: string, name: string) => applyImportedContent(content, name));
+  ipcMain.handle('settings:import-content', (_event, content: string) => applyImportedContent(content));
   ipcMain.handle('settings:import-url', async (_event, url: string) => {
     const content = await fetchRemoteText(url);
-    const parsed = new URL(url);
-    const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() ?? parsed.hostname);
-    return applyImportedContent(content, name, url);
+    return applyImportedContent(content);
   });
-  ipcMain.handle('settings:import-iptv', () => applyIptvCatalog());
   ipcMain.handle('settings:test-source', (_event, source: CmsSource) => testSource(source));
   ipcMain.handle('media:search', async (_event, query: string, category: MediaCategory) => {
     const settings = storage.getSettings(proxy?.port ?? 0);

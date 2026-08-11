@@ -16,15 +16,12 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late final TextEditingController _server;
   final _importUrl = TextEditingController();
   bool _importing = false;
-  String? _serverError;
 
   @override
   void initState() {
     super.initState();
-    _server = TextEditingController(text: widget.appState.serverUrl);
     widget.appState.addListener(_refresh);
   }
 
@@ -35,44 +32,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     widget.appState.removeListener(_refresh);
-    _server.dispose();
     _importUrl.dispose();
     super.dispose();
-  }
-
-  Future<void> _saveServer() async {
-    final value = _server.text.trim().replaceAll(RegExp(r'/$'), '');
-    final uri = Uri.tryParse(value);
-    if (uri == null ||
-        !uri.hasScheme ||
-        (uri.scheme != 'http' && uri.scheme != 'https') ||
-        uri.host.isEmpty) {
-      setState(() => _serverError = '请输入有效的 HTTP/HTTPS 地址');
-      return;
-    }
-    FocusManager.instance.primaryFocus?.unfocus();
-    await widget.appState.updateServerUrl(value);
-    if (mounted) {
-      setState(() => _serverError = null);
-      _message('服务地址已保存');
-    }
   }
 
   Future<void> _applyImport(ImportResult result) async {
     if (result.sources.isNotEmpty) {
       await widget.appState.mergeImportedSources(result.sources);
     }
-    if (result.lives.isNotEmpty) {
-      final map = {
-        for (var channel in widget.appState.liveChannels) channel.id: channel,
-      };
-      for (final channel in result.lives) {
-        map[channel.id] = channel;
-      }
-      await widget.appState.setLiveChannels(map.values.toList());
-    }
     _message(
-      '导入 ${result.sources.length} 个视频源、${result.lives.length} 个频道${result.failures.isNotEmpty ? '，${result.failures.length} 项失败' : ''}',
+      '导入 ${result.sources.length} 个点播源${result.failures.isNotEmpty ? '，${result.failures.length} 项失败' : ''}',
     );
   }
 
@@ -81,7 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (url.isEmpty) return;
     setState(() => _importing = true);
     try {
-      final result = await widget.appState.api.importUrl(url);
+      final result = await widget.appState.engine.importUrl(url);
       await _applyImport(result);
     } catch (error) {
       _message('导入失败：$error');
@@ -93,7 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _importFile() async {
     final picked = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['json', 'txt', 'm3u', 'm3u8'],
+      allowedExtensions: ['json', 'txt'],
       withData: true,
     );
     if (picked == null || picked.files.isEmpty) return;
@@ -102,7 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final file = picked.files.first;
       final bytes = file.bytes;
       if (bytes == null) throw Exception('未读取到文件内容');
-      final result = await widget.appState.api.importContent(
+      final result = await widget.appState.engine.importContent(
         utf8.decode(bytes),
         file.name,
       );
@@ -222,65 +191,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 112),
         children: [
           const SectionHeading(
-            title: '运行模式',
-            detail: '本地模式无需电脑，直接在手机上请求视频源；远程模式连接电脑上的 VideoGET 服务',
+            title: '本地引擎',
+            detail: '所有搜索、解析、播放与收藏均在手机上完成，不需要连接电脑',
           ),
-          const SizedBox(height: 10),
-          SwitchListTile(
-            title: const Text('本地模式（不连电脑）'),
-            subtitle: Text(
-              widget.appState.localMode
-                  ? '已开启：手机直接请求 CMS 视频源'
-                  : '已关闭：需要电脑运行 VideoGET 服务',
-            ),
-            value: widget.appState.localMode,
-            onChanged: (value) => widget.appState.updateLocalMode(value),
+          const SizedBox(height: 12),
+          const ListTile(
+            contentPadding: EdgeInsets.symmetric(horizontal: 4),
+            leading: Icon(Icons.offline_bolt_rounded),
+            title: Text('仅本地模式'),
+            subtitle: Text('直接请求已启用的视频源，配置和观看记录保存在本机'),
+            trailing: Icon(Icons.check_circle_rounded),
           ),
-          const SizedBox(height: 20),
-          const SectionHeading(
-            title: 'VideoGET 服务',
-            detail: '移动端通过这个地址访问聚合 API',
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _server,
-                  keyboardType: TextInputType.url,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _saveServer(),
-                  decoration: InputDecoration(
-                    hintText: 'http://10.0.2.2:3000',
-                    errorText: _serverError,
-                    prefixIcon: const Icon(Icons.dns_outlined),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filledTonal(
-                tooltip: '保存服务地址',
-                onPressed: _saveServer,
-                icon: const Icon(Icons.save_outlined),
-              ),
-            ],
-          ),
-          if (widget.appState.localMode)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                '本地模式已开启，无需填写此地址。切换到远程模式后此地址生效。',
-                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
-              ),
-            ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
           SectionHeading(
             title: '视频源',
             detail: '${widget.appState.sources.length} 个来源，开关控制是否参与搜索',
@@ -320,8 +248,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 28),
           const SectionHeading(
-            title: 'TVBox / IPTV 导入',
-            detail: '支持配置 URL、CMS、M3U 和 M3U8 内容',
+            title: 'TVBox 点播配置',
+            detail: '支持配置 URL、JSON 文件与 CMS 点播来源',
           ),
           const SizedBox(height: 10),
           Row(
@@ -331,7 +259,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   controller: _importUrl,
                   keyboardType: TextInputType.url,
                   decoration: const InputDecoration(
-                    hintText: '配置或播放列表 URL',
+                    hintText: 'TVBox 点播配置 URL',
                     prefixIcon: Icon(Icons.link_rounded),
                   ),
                 ),
@@ -350,7 +278,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: OutlinedButton.icon(
               onPressed: _importing ? null : _importFile,
               icon: const Icon(Icons.file_open_outlined),
-              label: const Text('从文件导入 JSON / M3U'),
+              label: const Text('从文件导入 JSON 配置'),
             ),
           ),
           if (_importing)
@@ -382,12 +310,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
           const SizedBox(height: 18),
-          Text(
-            '当前服务：${widget.appState.serverUrl}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
-          ),
+          const Text('本地引擎运行中 · 数据仅保存在本机', style: TextStyle(fontSize: 12)),
         ],
       ),
     );
@@ -411,7 +334,7 @@ class _SourceRow extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: AppColors.surface,
-         borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.outlineVariant),
       ),
       child: Padding(

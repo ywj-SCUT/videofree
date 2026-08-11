@@ -1,7 +1,7 @@
 'use client';
 
 import type {
-  AppSettings, CmsSource, DanmakuProvider, ImportResult, LibraryState, LumenApi, LiveChannel,
+  AppSettings, CmsSource, DanmakuProvider, ImportResult, LibraryState, LumenApi,
   MediaCategory, MediaItem, SearchResponse,
 } from '../../src/types';
 
@@ -13,7 +13,6 @@ const defaultSources: CmsSource[] = [
 ];
 const defaultSettings: AppSettings = {
   sources: defaultSources,
-  liveChannels: [],
   danmakuProviders: [{ id: 'bilibili', name: 'Bilibili 弹幕', type: 'bilibili', enabled: true }],
   adFiltering: true,
   qualityPreference: 'highest',
@@ -33,7 +32,14 @@ function readValue<T>(key: string, fallback: T): T {
 
 function settings(): AppSettings {
   const value = readValue(SETTINGS_KEY, defaultSettings);
-  return { ...value, sources: value.sources?.length ? value.sources : structuredClone(defaultSources), proxyPort: 0, proxyBaseUrl: '/api/proxy' };
+  return {
+    sources: value.sources?.length ? value.sources : structuredClone(defaultSources),
+    danmakuProviders: value.danmakuProviders ?? structuredClone(defaultSettings.danmakuProviders),
+    adFiltering: value.adFiltering ?? true,
+    qualityPreference: value.qualityPreference ?? 'highest',
+    proxyPort: 0,
+    proxyBaseUrl: '/api/proxy',
+  };
 }
 
 function saveSettings(value: AppSettings): AppSettings {
@@ -53,17 +59,13 @@ async function request<T>(path: string, body: unknown): Promise<T> {
   return payload;
 }
 
-function mergeImported(current: AppSettings, imported: { sources: CmsSource[]; lives: LiveChannel[]; failures?: string[] }): ImportResult {
+function mergeImported(current: AppSettings, imported: { sources: CmsSource[]; failures?: string[] }): ImportResult {
   const sources = new Map(current.sources.map((source) => [source.id, source]));
   const sourceCount = sources.size;
   imported.sources.forEach((source) => sources.set(source.id, source));
-  const lives = new Map(current.liveChannels.map((channel) => [channel.id, channel]));
-  const liveCount = lives.size;
-  imported.lives.forEach((channel) => lives.set(channel.id, channel));
-  const next = saveSettings({ ...current, sources: [...sources.values()], liveChannels: [...lives.values()] });
+  const next = saveSettings({ ...current, sources: [...sources.values()] });
   return {
     importedSources: sources.size - sourceCount,
-    importedLives: lives.size - liveCount,
     failures: imported.failures ?? [],
     settings: next,
   };
@@ -95,9 +97,6 @@ export function installWebApi(): void {
     },
     async importUrl(url: string) {
       return mergeImported(settings(), await request('/api/import-url', { url }));
-    },
-    async importIptvCatalog() {
-      return mergeImported(settings(), await request('/api/iptv', {}));
     },
     async saveDanmakuProviders(danmakuProviders: DanmakuProvider[]) { return saveSettings({ ...settings(), danmakuProviders }); },
     async saveAdFiltering(adFiltering: boolean) { return saveSettings({ ...settings(), adFiltering }); },

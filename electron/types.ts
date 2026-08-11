@@ -1,4 +1,4 @@
-export type MediaCategory = 'all' | 'movie' | 'series' | 'anime' | 'short' | 'ai-short' | 'live';
+export type MediaCategory = 'all' | 'movie' | 'series' | 'anime' | 'short' | 'ai-short';
 
 export interface Episode {
   name: string;
@@ -56,18 +56,6 @@ export interface PlaybackResolution {
   headers?: Record<string, string>;
 }
 
-export interface LiveChannel {
-  id: string;
-  sourceId: string;
-  sourceName: string;
-  name: string;
-  group: string;
-  url: string;
-  urls?: string[];
-  logo?: string;
-  tvgId?: string;
-}
-
 export interface DanmakuProvider {
   id: string;
   name: string;
@@ -101,7 +89,6 @@ export interface DanmakuResponse {
 
 export interface ImportResult {
   importedSources: number;
-  importedLives: number;
   failures: string[];
   settings: AppSettings;
 }
@@ -127,7 +114,6 @@ export interface LibraryState {
 
 export interface AppSettings {
   sources: CmsSource[];
-  liveChannels: LiveChannel[];
   danmakuProviders: DanmakuProvider[];
   adFiltering: boolean;
   qualityPreference: 'auto' | 'highest' | '1080p' | '720p';

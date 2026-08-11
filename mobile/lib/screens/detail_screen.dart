@@ -36,7 +36,7 @@ class _DetailScreenState extends State<DetailScreen> {
       _error = null;
     });
     try {
-      final result = await widget.appState.api.resolve(
+      final result = await widget.appState.engine.resolve(
         widget.item,
         widget.appState.sources,
       );
@@ -158,9 +158,8 @@ class _DetailScreenState extends State<DetailScreen> {
 
     final lines = item.playLines ?? [];
     final sourceCount = item.alternatives?.length ?? 1;
-    final posterUrl = resolveMediaUrl(widget.appState.serverUrl, item.poster);
+    final posterUrl = resolveMediaUrl(item.poster);
     final backdropUrl = resolveMediaUrl(
-      widget.appState.serverUrl,
       item.backdrop?.isNotEmpty == true ? item.backdrop! : item.poster,
     );
     return ListView(
@@ -274,9 +273,7 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
           ),
         ),
-        SizedBox(
-          height: 2,
-        ),
+        SizedBox(height: 2),
         if (item.summary?.isNotEmpty == true) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 26, 16, 0),
@@ -296,7 +293,8 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
           ),
         ],
-        if (item.actors?.isNotEmpty == true || item.director?.isNotEmpty == true)
+        if (item.actors?.isNotEmpty == true ||
+            item.director?.isNotEmpty == true)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
             child: Column(
@@ -348,41 +346,41 @@ class _DetailScreenState extends State<DetailScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 104,
-              mainAxisExtent: 44,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemCount: lines[_lineIndex].episodes.length,
-            itemBuilder: (context, index) {
-              final episode = lines[_lineIndex].episodes[index];
-              final selected = index == _episodeIndex;
-              return OutlinedButton(
-                onPressed: () {
-                  HapticFeedback.selectionClick();
-                  setState(() => _episodeIndex = index);
-                  _play();
-                },
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: selected
-                      ? theme.colorScheme.primaryContainer
-                      : AppColors.surface,
-                  foregroundColor: selected
-                      ? theme.colorScheme.onPrimaryContainer
-                      : theme.colorScheme.onSurface,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                ),
-                child: Text(
-                  episode.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12),
-                ),
-              );
-            },
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 104,
+                mainAxisExtent: 44,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemCount: lines[_lineIndex].episodes.length,
+              itemBuilder: (context, index) {
+                final episode = lines[_lineIndex].episodes[index];
+                final selected = index == _episodeIndex;
+                return OutlinedButton(
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _episodeIndex = index);
+                    _play();
+                  },
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: selected
+                        ? theme.colorScheme.primaryContainer
+                        : AppColors.surface,
+                    foregroundColor: selected
+                        ? theme.colorScheme.onPrimaryContainer
+                        : theme.colorScheme.onSurface,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                  ),
+                  child: Text(
+                    episode.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                );
+              },
             ),
           ),
         ],

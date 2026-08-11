@@ -24,5 +24,4 @@ abstract interface class VideoEngine {
   Future<ImportResult> importTvBox(dynamic config);
   Future<ImportResult> importContent(String content, String name);
   Future<ImportResult> importUrl(String url);
-  Future<ImportResult> importIptv();
 }

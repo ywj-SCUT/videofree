@@ -162,22 +162,6 @@ void main() {
       );
       expect(imported.sources.last.ruleConfig, {'region': 'us'});
     });
-
-    test('解析直连直播频道', () {
-      final imported = engine.importTvBox({
-        'lives': [
-          {
-            'key': 'live1',
-            'name': '直播1',
-            'channels': [
-              {'name': '频道A', 'url': 'https://stream.example.com/a.m3u8'},
-            ],
-          },
-        ],
-      });
-      expect(imported.lives, hasLength(1));
-      expect(imported.lives.first.name, '频道A');
-    });
   });
 
   group('Spider 本地规则链路', () {

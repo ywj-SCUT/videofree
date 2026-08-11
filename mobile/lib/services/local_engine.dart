@@ -1,21 +1,15 @@
 import '../models/models.dart';
 import 'import_service.dart';
-import 'iptv_catalog.dart';
 import 'source_engine.dart';
 import 'video_engine.dart';
 
 class LocalEngine implements VideoEngine {
-  LocalEngine({
-    SourceEngine? sourceEngine,
-    ImportService? importService,
-    IptvCatalog? iptvCatalog,
-  })  : _sourceEngine = sourceEngine ?? SourceEngine(),
-        _importService = importService ?? ImportService(),
-        _iptvCatalog = iptvCatalog ?? IptvCatalog();
+  LocalEngine({SourceEngine? sourceEngine, ImportService? importService})
+    : _sourceEngine = sourceEngine ?? SourceEngine(),
+      _importService = importService ?? ImportService();
 
   final SourceEngine _sourceEngine;
   final ImportService _importService;
-  final IptvCatalog _iptvCatalog;
 
   @override
   Future<SearchResponse> search(
@@ -52,11 +46,4 @@ class LocalEngine implements VideoEngine {
 
   @override
   Future<ImportResult> importUrl(String url) => _importService.importUrl(url);
-
-  @override
-  Future<ImportResult> importIptv() async {
-    final lives = await _iptvCatalog.fetchIptvCatalog();
-    if (lives.isEmpty) throw Exception('公开 IPTV 目录没有返回可用频道');
-    return ImportResult(sources: const [], lives: lives, failures: const []);
-  }
 }

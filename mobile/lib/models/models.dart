@@ -1,6 +1,6 @@
 // VideoGET shared data models - mirrors the TypeScript types.
 
-enum MediaCategory { all, movie, series, anime, short, aiShort, live }
+enum MediaCategory { all, movie, series, anime, short, aiShort }
 
 extension MediaCategoryX on MediaCategory {
   String get label {
@@ -14,11 +14,9 @@ extension MediaCategoryX on MediaCategory {
       case MediaCategory.anime:
         return '动漫';
       case MediaCategory.short:
-        return '短剧';
+        return '短视频';
       case MediaCategory.aiShort:
-        return 'AI 短剧';
-      case MediaCategory.live:
-        return '直播';
+        return 'AI 短视频';
     }
   }
 
@@ -45,8 +43,6 @@ extension MediaCategoryX on MediaCategory {
         return MediaCategory.short;
       case 'ai-short':
         return MediaCategory.aiShort;
-      case 'live':
-        return MediaCategory.live;
       default:
         return MediaCategory.all;
     }
@@ -291,47 +287,6 @@ class CmsSource {
   };
 }
 
-class LiveChannel {
-  final String id;
-  final String sourceId;
-  final String sourceName;
-  final String name;
-  final String group;
-  final String url;
-  final List<String>? urls;
-  final String? logo;
-  const LiveChannel({
-    required this.id,
-    required this.sourceId,
-    required this.sourceName,
-    required this.name,
-    required this.group,
-    required this.url,
-    this.urls,
-    this.logo,
-  });
-  factory LiveChannel.fromJson(Map<String, dynamic> json) => LiveChannel(
-    id: json['id'] as String? ?? '',
-    sourceId: json['sourceId'] as String? ?? '',
-    sourceName: json['sourceName'] as String? ?? '',
-    name: json['name'] as String? ?? '',
-    group: json['group'] as String? ?? '',
-    url: json['url'] as String? ?? '',
-    urls: (json['urls'] as List<dynamic>?)?.cast<String>(),
-    logo: json['logo'] as String?,
-  );
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'sourceId': sourceId,
-    'sourceName': sourceName,
-    'name': name,
-    'group': group,
-    'url': url,
-    if (urls != null) 'urls': urls,
-    if (logo != null) 'logo': logo,
-  };
-}
-
 class HistoryItem {
   final MediaItem item;
   final String? lineName;
@@ -367,19 +322,11 @@ class HistoryItem {
 
 class ImportResult {
   final List<CmsSource> sources;
-  final List<LiveChannel> lives;
   final List<String> failures;
-  const ImportResult({
-    required this.sources,
-    required this.lives,
-    required this.failures,
-  });
+  const ImportResult({required this.sources, required this.failures});
   factory ImportResult.fromJson(Map<String, dynamic> json) => ImportResult(
     sources: (json['sources'] as List<dynamic>? ?? [])
         .map((e) => CmsSource.fromJson(e as Map<String, dynamic>))
-        .toList(),
-    lives: (json['lives'] as List<dynamic>? ?? [])
-        .map((e) => LiveChannel.fromJson(e as Map<String, dynamic>))
         .toList(),
     failures: (json['failures'] as List<dynamic>? ?? []).cast<String>(),
   );

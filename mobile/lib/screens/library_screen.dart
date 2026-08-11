@@ -103,7 +103,9 @@ class _LibraryScreenState extends State<LibraryScreen>
           tileColor: AppColors.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            side: BorderSide(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
           ),
           contentPadding: const EdgeInsets.symmetric(
             vertical: 9,
@@ -117,10 +119,7 @@ class _LibraryScreenState extends State<LibraryScreen>
               child: item.poster.isEmpty
                   ? const _LibraryPosterFallback()
                   : CachedNetworkImage(
-                      imageUrl: resolveMediaUrl(
-                        widget.appState.serverUrl,
-                        item.poster,
-                      ),
+                      imageUrl: resolveMediaUrl(item.poster),
                       fit: BoxFit.cover,
                       placeholder: (_, _) => const _LibraryPosterFallback(),
                       errorWidget: (_, _, _) => const _LibraryPosterFallback(),

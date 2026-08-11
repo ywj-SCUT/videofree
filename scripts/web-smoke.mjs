@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,11 +65,6 @@ try {
   const merged = search.items.find((item) => item.title === '哪吒之魔童闹海');
   assert(search.items.length >= 10, `聚合搜索结果过少: ${search.items.length}`);
   assert((merged?.alternatives?.length ?? 0) >= 2, '跨源片名没有合并线路');
-
-  const content = await readFile(path.join(root, 'tests', 'fixtures', 'live-smoke.m3u'), 'utf8');
-  const imported = await post(origin, '/api/import', { content, name: 'live-smoke.m3u' });
-  assert(imported.lives.length === 1, `M3U 导入频道数异常: ${imported.lives.length}`);
-  assert(imported.lives[0].urls.length === 2, `M3U 多线路数异常: ${imported.lives[0].urls.length}`);
 
   const masterTarget = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
   const masterResponse = await fetch(`${origin}/api/proxy?url=${encodeURIComponent(masterTarget)}`);

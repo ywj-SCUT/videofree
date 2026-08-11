@@ -1,4 +1,4 @@
-export type MediaCategory = 'all' | 'movie' | 'series' | 'anime' | 'short' | 'ai-short' | 'live';
+export type MediaCategory = 'all' | 'movie' | 'series' | 'anime' | 'short' | 'ai-short';
 export interface Episode { name: string; url: string; sourceId?: string; headers?: Record<string, string> }
 export interface PlayLine { name: string; episodes: Episode[] }
 export interface MediaVariant { id: string; sourceId: string; sourceName: string }
@@ -15,10 +15,6 @@ export interface CmsSource {
   scriptUrl?: string; ruleConfig?: Record<string, unknown>;
 }
 export interface PlaybackResolution { url: string; headers?: Record<string, string> }
-export interface LiveChannel {
-  id: string; sourceId: string; sourceName: string; name: string; group: string;
-  url: string; urls?: string[]; logo?: string; tvgId?: string;
-}
 export interface DanmakuProvider {
   id: string; name: string; type: 'bilibili' | 'dandanplay'; api?: string; enabled: boolean;
 }
@@ -28,7 +24,7 @@ export interface DanmakuResponse {
   comments: DanmakuComment[]; matches: DanmakuMatch[];
   failures: Array<{ providerId: string; providerName: string; message: string }>; elapsedMs: number;
 }
-export interface ImportResult { importedSources: number; importedLives: number; failures: string[]; settings: AppSettings }
+export interface ImportResult { importedSources: number; failures: string[]; settings: AppSettings }
 export interface SearchResponse { items: MediaItem[]; failures: Array<{ sourceId: string; sourceName: string; message: string }>; elapsedMs: number }
 export interface HistoryItem extends MediaItem {
   lineName?: string; episodeName?: string; progress: number; duration: number; watchedAt: number;
@@ -38,7 +34,7 @@ export interface LibraryState {
   history: HistoryItem[];
 }
 export interface AppSettings {
-  sources: CmsSource[]; liveChannels: LiveChannel[]; danmakuProviders: DanmakuProvider[]; adFiltering: boolean;
+  sources: CmsSource[]; danmakuProviders: DanmakuProvider[]; adFiltering: boolean;
   qualityPreference: 'auto' | 'highest' | '1080p' | '720p'; proxyPort: number; proxyBaseUrl?: string;
 }
 export interface LumenApi {
@@ -52,7 +48,6 @@ export interface LumenApi {
   importTvBox(config: unknown): Promise<ImportResult>;
   importContent(content: string, name: string): Promise<ImportResult>;
   importUrl(url: string): Promise<ImportResult>;
-  importIptvCatalog(): Promise<ImportResult>;
   saveDanmakuProviders(providers: DanmakuProvider[]): Promise<AppSettings>;
   saveAdFiltering(enabled: boolean): Promise<AppSettings>;
   danmaku(title: string, episodeName: string): Promise<DanmakuResponse>;

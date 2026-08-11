@@ -4,28 +4,10 @@ import '../models/models.dart';
 import 'net_service.dart';
 import 'spider_engine.dart';
 
-class LivePlaylistReference {
-  final String id;
-  final String name;
-  final String url;
-
-  const LivePlaylistReference({
-    required this.id,
-    required this.name,
-    required this.url,
-  });
-}
-
 class TvBoxImport {
   final List<CmsSource> sources;
-  final List<LiveChannel> lives;
-  final List<LivePlaylistReference> livePlaylists;
 
-  const TvBoxImport({
-    required this.sources,
-    required this.lives,
-    required this.livePlaylists,
-  });
+  const TvBoxImport({required this.sources});
 }
 
 class SourceEngine {
@@ -420,8 +402,6 @@ class SourceEngine {
   TvBoxImport importTvBox(dynamic input) {
     final config = _map(input);
     final sources = <CmsSource>[];
-    final lives = <LiveChannel>[];
-    final playlists = <LivePlaylistReference>[];
     final sites = _rawList(config['sites']);
     for (var index = 0; index < sites.length; index++) {
       final site = _map(sites[index]);
@@ -478,56 +458,7 @@ class SourceEngine {
         );
       }
     }
-    final rawLives = _rawList(config['lives']);
-    for (var index = 0; index < rawLives.length; index++) {
-      final live = _map(rawLives[index]);
-      final sourceId = _text(live['key']).isNotEmpty
-          ? _text(live['key'])
-          : 'tvbox-live-$index';
-      final sourceName = _text(live['name']).isNotEmpty
-          ? _text(live['name'])
-          : '直播源 ${index + 1}';
-      final url = _text(live['url']);
-      if (_isHttp(url)) {
-        playlists.add(
-          LivePlaylistReference(id: sourceId, name: sourceName, url: url),
-        );
-      }
-      final channels = _rawList(live['channels']);
-      for (
-        var channelIndex = 0;
-        channelIndex < channels.length;
-        channelIndex++
-      ) {
-        final channel = _map(channels[channelIndex]);
-        final channelUrl = _text(channel['url']);
-        if (!_isHttp(channelUrl)) continue;
-        final name = _text(channel['name']).isNotEmpty
-            ? _text(channel['name'])
-            : '频道 ${channelIndex + 1}';
-        lives.add(
-          LiveChannel(
-            id: '$sourceId-$channelIndex',
-            sourceId: sourceId,
-            sourceName: sourceName,
-            name: name,
-            group: _text(channel['group']).isNotEmpty
-                ? _text(channel['group'])
-                : sourceName,
-            url: channelUrl,
-            urls: [channelUrl],
-            logo: _text(channel['logo']).isEmpty
-                ? null
-                : _text(channel['logo']),
-          ),
-        );
-      }
-    }
-    return TvBoxImport(
-      sources: sources,
-      lives: lives,
-      livePlaylists: playlists,
-    );
+    return TvBoxImport(sources: sources);
   }
 
   Future<dynamic> _fetchCmsJson(String url, CmsSource source) async {

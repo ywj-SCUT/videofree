@@ -12,7 +12,6 @@ interface PersistedData {
 const defaults: PersistedData = {
   settings: {
     sources: DEFAULT_SOURCES,
-    liveChannels: [],
     danmakuProviders: [{ id: 'bilibili', name: 'Bilibili 弹幕', type: 'bilibili', enabled: true }],
     adFiltering: true,
     qualityPreference: 'highest',
@@ -31,12 +30,6 @@ export class Storage {
     try {
       const raw = await readFile(this.file, 'utf8');
       const parsed = JSON.parse(raw) as Partial<PersistedData>;
-      const liveChannels = (parsed.settings?.liveChannels ?? []).map((channel) => ({
-        ...channel,
-        sourceId: channel.sourceId ?? 'legacy-live',
-        sourceName: channel.sourceName ?? '已导入直播',
-        urls: channel.urls?.length ? channel.urls : [channel.url],
-      }));
       const persistedSources = parsed.settings?.sources ?? [];
       const hasManagedDefaults = persistedSources.some((source) => source.id.startsWith('builtin-line-'));
       const enabledById = new Map(persistedSources.map((source) => [source.id, source.enabled]));
@@ -49,10 +42,10 @@ export class Storage {
         : structuredClone(DEFAULT_SOURCES);
       this.data = {
         settings: {
-          ...defaults.settings,
-          ...parsed.settings,
           sources,
-          liveChannels,
+          danmakuProviders: parsed.settings?.danmakuProviders ?? structuredClone(defaults.settings.danmakuProviders),
+          adFiltering: parsed.settings?.adFiltering ?? defaults.settings.adFiltering,
+          qualityPreference: parsed.settings?.qualityPreference ?? defaults.settings.qualityPreference,
         },
         library: { ...defaults.library, ...parsed.library },
       };

@@ -7,10 +7,7 @@ class StorageService {
   static const _sourcesKey = 'videoget.sources';
   static const _favoritesKey = 'videoget.favorites';
   static const _historyKey = 'videoget.history';
-  static const _serverKey = 'videoget.serverUrl';
   static const _qualityKey = 'videoget.quality';
-  static const _liveKey = 'videoget.liveChannels';
-  static const _localModeKey = 'videoget.localMode';
 
   static const _defaultSources = [
     {
@@ -90,26 +87,6 @@ class StorageService {
     );
   }
 
-  Future<String> getServerUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_serverKey) ?? 'http://10.0.2.2:3000';
-  }
-
-  Future<bool> getLocalMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_localModeKey) ?? true;
-  }
-
-  Future<void> saveLocalMode(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_localModeKey, enabled);
-  }
-
-  Future<void> saveServerUrl(String url) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_serverKey, url);
-  }
-
   Future<String> getQualityPreference() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_qualityKey) ?? 'highest';
@@ -118,23 +95,5 @@ class StorageService {
   Future<void> saveQualityPreference(String quality) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_qualityKey, quality);
-  }
-
-  Future<List<LiveChannel>> getLiveChannels() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_liveKey);
-    if (raw == null) return [];
-    final list = jsonDecode(raw) as List<dynamic>;
-    return list
-        .map((e) => LiveChannel.fromJson(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<void> saveLiveChannels(List<LiveChannel> channels) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _liveKey,
-      jsonEncode(channels.map((e) => e.toJson()).toList()),
-    );
   }
 }

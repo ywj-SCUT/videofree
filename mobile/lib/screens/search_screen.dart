@@ -44,7 +44,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _failures = [];
     });
     try {
-      final response = await widget.appState.api.search(
+      final response = await widget.appState.engine.search(
         query.trim(),
         _category,
         widget.appState.sources,
@@ -106,31 +106,31 @@ class _SearchScreenState extends State<SearchScreen> {
                     height: 28,
                   ),
                   const SizedBox(width: 10),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '今晚看什么',
-                              style: TextStyle(
-                                color: AppColors.secondary,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: .4,
-                              ),
-                            ),
-                            Text(
-                              '发现好内容',
-                              style: TextStyle(
-                                fontSize: 21,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            Text(
-                              '全源聚合 · 本地优先',
-                              style: TextStyle(
-                                color: Color(0xFFAAA4AB),
-                                fontSize: 12,
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '今晚看什么',
+                          style: TextStyle(
+                            color: AppColors.secondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: .4,
+                          ),
+                        ),
+                        Text(
+                          '发现好内容',
+                          style: TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          '全源聚合 · 本地优先',
+                          style: TextStyle(
+                            color: Color(0xFFAAA4AB),
+                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -199,7 +199,6 @@ class _SearchScreenState extends State<SearchScreen> {
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 children: MediaCategory.values
-                    .where((category) => category != MediaCategory.live)
                     .map(
                       (category) => Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -220,7 +219,6 @@ class _SearchScreenState extends State<SearchScreen> {
                 child: _MobileFeaturedBanner(
                   item: _results.first,
                   imageUrl: resolveMediaUrl(
-                    widget.appState.serverUrl,
                     _results.first.backdrop?.isNotEmpty == true
                         ? _results.first.backdrop!
                         : _results.first.poster,
@@ -279,7 +277,7 @@ class _SearchScreenState extends State<SearchScreen> {
       return EmptyState(
         icon: Icons.manage_search_rounded,
         title: '没有找到内容',
-        detail: _failures.isEmpty ? '换一个片名或分类试试' : '请检查服务地址和视频源状态',
+        detail: _failures.isEmpty ? '换一个片名或分类试试' : '请检查视频源状态',
       );
     }
 
@@ -297,7 +295,7 @@ class _SearchScreenState extends State<SearchScreen> {
         final item = _results[index];
         return _MediaCard(
           item: item,
-          imageUrl: resolveMediaUrl(widget.appState.serverUrl, item.poster),
+          imageUrl: resolveMediaUrl(item.poster),
           onTap: () => _openDetail(item),
         );
       },

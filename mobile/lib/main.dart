@@ -5,7 +5,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:media_kit/media_kit.dart';
 import 'services/app_state.dart';
 import 'screens/search_screen.dart';
-import 'screens/live_screen.dart';
+import 'screens/shorts_screen.dart';
 import 'screens/library_screen.dart';
 import 'screens/settings_screen.dart';
 import 'theme/app_theme.dart';
@@ -99,7 +99,7 @@ class _MainShellState extends State<MainShell> {
     super.initState();
     _pages = [
       SearchScreen(appState: widget.appState),
-      LiveScreen(appState: widget.appState),
+      ShortsScreen(appState: widget.appState),
       LibraryScreen(appState: widget.appState),
       SettingsScreen(appState: widget.appState),
     ];
@@ -135,9 +135,9 @@ class _MainShellState extends State<MainShell> {
                   label: '搜索',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.live_tv_outlined),
-                  selectedIcon: Icon(Icons.live_tv_rounded),
-                  label: '直播',
+                  icon: Icon(Icons.smart_display_outlined),
+                  selectedIcon: Icon(Icons.smart_display_rounded),
+                  label: '短视频',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.video_library_outlined),

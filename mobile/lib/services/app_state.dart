@@ -1,61 +1,30 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import 'storage_service.dart';
-import 'api_client.dart';
 import 'local_engine.dart';
 import 'video_engine.dart';
 
-/// Central app state: sources, favorites, history, live channels, engine config.
+/// Central app state for the on-device engine and local library.
 class AppState extends ChangeNotifier {
   final StorageService _storage = StorageService();
-  VideoEngine? _engine;
+  final VideoEngine _engine = LocalEngine();
 
   List<CmsSource> _sources = [];
   List<MediaItem> _favorites = [];
   List<HistoryItem> _history = [];
-  List<LiveChannel> _liveChannels = [];
-  bool _localMode = true;
-  String _serverUrl = 'http://10.0.2.2:3000';
   String _qualityPreference = 'highest';
 
   List<CmsSource> get sources => _sources;
   List<MediaItem> get favorites => _favorites;
   List<HistoryItem> get history => _history;
-  List<LiveChannel> get liveChannels => _liveChannels;
-  bool get localMode => _localMode;
-  String get serverUrl => _serverUrl;
   String get qualityPreference => _qualityPreference;
-  VideoEngine get api => _engine ??= _buildEngine();
-
-  VideoEngine _buildEngine() {
-    if (_localMode) return LocalEngine();
-    return ApiClient(baseUrl: _serverUrl);
-  }
+  VideoEngine get engine => _engine;
 
   Future<void> initialize() async {
-    _localMode = await _storage.getLocalMode();
-    _serverUrl = await _storage.getServerUrl();
-    _engine = _buildEngine();
     _sources = await _storage.getSources();
     _favorites = await _storage.getFavorites();
     _history = await _storage.getHistory();
-    _liveChannels = await _storage.getLiveChannels();
     _qualityPreference = await _storage.getQualityPreference();
-    notifyListeners();
-  }
-
-  Future<void> updateLocalMode(bool enabled) async {
-    if (_localMode == enabled) return;
-    _localMode = enabled;
-    _engine = _buildEngine();
-    await _storage.saveLocalMode(enabled);
-    notifyListeners();
-  }
-
-  Future<void> updateServerUrl(String url) async {
-    _serverUrl = url;
-    _engine = _buildEngine();
-    await _storage.saveServerUrl(url);
     notifyListeners();
   }
 
@@ -119,12 +88,6 @@ class AppState extends ChangeNotifier {
   Future<void> clearHistory() async {
     _history = [];
     await _storage.saveHistory(_history);
-    notifyListeners();
-  }
-
-  Future<void> setLiveChannels(List<LiveChannel> channels) async {
-    _liveChannels = channels;
-    await _storage.saveLiveChannels(channels);
     notifyListeners();
   }
 

@@ -31,7 +31,7 @@ function normalizeHeaders(value: unknown): Record<string, string> | undefined {
 
 function normalizeCategory(value: unknown): MediaCategory {
   const category = text(value) as MediaCategory;
-  return ['movie', 'series', 'anime', 'short', 'ai-short', 'live'].includes(category) ? category : 'movie';
+  return ['movie', 'series', 'anime', 'short', 'ai-short'].includes(category) ? category : 'movie';
 }
 
 function encodeToken(value: unknown): string {
