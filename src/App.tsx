@@ -61,7 +61,22 @@ function attachHls(video: HTMLVideoElement, sourceUrl: string, art: Artplayer, p
     if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = sourceUrl;
     return;
   }
-  const hls = new Hls({ enableWorker: true, lowLatencyMode });
+  const hls = new Hls({
+    enableWorker: true,
+    lowLatencyMode,
+    maxBufferLength: 30,
+    maxMaxBufferLength: 60,
+    backBufferLength: 30,
+    fragLoadingMaxRetry: 6,
+    fragLoadingRetryDelay: 500,
+    manifestLoadingMaxRetry: 3,
+    levelLoadingMaxRetry: 3,
+    startLevel: -1,
+    capLevelToPlayerSize: true,
+    abrEwmaDefaultEstimate: 1_000_000,
+    abrBandWidthFactor: 0.95,
+    abrBandWidthUpFactor: 0.7,
+  });
   art.hls = hls;
   hls.loadSource(sourceUrl);
   hls.attachMedia(video);
@@ -678,7 +693,7 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
           fullscreen: true,
           fullscreenWeb: true,
           pip: true,
-          playbackRate: true,
+          playbackRate: [1, 1.5, 2] as unknown as boolean,
           aspectRatio: true,
           setting: true,
           hotkey: true,
