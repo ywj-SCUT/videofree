@@ -100,9 +100,14 @@ class _LibraryScreenState extends State<LibraryScreen>
         final item = items[index];
         final h = history == null ? null : history[index];
         return ListTile(
+          tileColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
           contentPadding: const EdgeInsets.symmetric(
-            vertical: 7,
-            horizontal: 4,
+            vertical: 9,
+            horizontal: 10,
           ),
           leading: ClipRRect(
             borderRadius: BorderRadius.circular(6),

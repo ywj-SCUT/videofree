@@ -227,9 +227,16 @@ class _LiveScreenState extends State<LiveScreen> {
                         onTap: () => _play(channel),
                         semanticLabel: channel.name,
                         child: ListTile(
+                          tileColor: AppColors.surface,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(
+                              color: Theme.of(context).colorScheme.outlineVariant,
+                            ),
+                          ),
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 4,
-                            vertical: 5,
+                            vertical: 8,
                           ),
                           leading: ClipRRect(
                             borderRadius: BorderRadius.circular(8),

@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
 abstract final class AppColors {
-  static const background = Color(0xFF08090B);
-  static const surface = Color(0xFF111317);
-  static const surfaceRaised = Color(0xFF191C21);
-  static const surfaceHighest = Color(0xFF23272D);
-  static const outline = Color(0xFF343941);
-  static const primary = Color(0xFFFF665C);
-  static const secondary = Color(0xFF5BD7C4);
+  static const background = Color(0xFF0B0D10);
+  static const surface = Color(0xFF11151A);
+  static const surfaceRaised = Color(0xFF171C22);
+  static const surfaceHighest = Color(0xFF222A31);
+  static const outline = Color(0xFF34404A);
+  static const primary = Color(0xFFFF6B61);
+  static const secondary = Color(0xFF4FD2BD);
 }
 
 abstract final class AppTheme {
@@ -15,11 +15,11 @@ abstract final class AppTheme {
     const scheme = ColorScheme.dark(
       primary: AppColors.primary,
       onPrimary: Color(0xFF2B0300),
-      primaryContainer: Color(0xFF55201C),
+      primaryContainer: Color(0xFF57221E),
       onPrimaryContainer: Color(0xFFFFDAD6),
       secondary: AppColors.secondary,
       onSecondary: Color(0xFF00382F),
-      secondaryContainer: Color(0xFF0C4F45),
+      secondaryContainer: Color(0xFF0C5148),
       onSecondaryContainer: Color(0xFFB5F4E8),
       error: Color(0xFFFFB4AB),
       onError: Color(0xFF690005),
@@ -94,10 +94,10 @@ abstract final class AppTheme {
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: const Color(0xE6101114),
-        indicatorColor: AppColors.primary.withValues(alpha: 0.18),
+        backgroundColor: const Color(0xEE10161B),
+        indicatorColor: AppColors.primary.withValues(alpha: 0.20),
         surfaceTintColor: Colors.transparent,
-        height: 72,
+        height: 74,
         elevation: 0,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           return TextStyle(

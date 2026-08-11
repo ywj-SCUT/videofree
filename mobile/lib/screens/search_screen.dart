@@ -106,22 +106,31 @@ class _SearchScreenState extends State<SearchScreen> {
                     height: 28,
                   ),
                   const SizedBox(width: 10),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'VideoGET',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        Text(
-                          '全源聚合',
-                          style: TextStyle(
-                            color: Color(0xFFAAA4AB),
-                            fontSize: 12,
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '今晚看什么',
+                              style: TextStyle(
+                                color: AppColors.secondary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: .4,
+                              ),
+                            ),
+                            Text(
+                              '发现好内容',
+                              style: TextStyle(
+                                fontSize: 21,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Text(
+                              '全源聚合 · 本地优先',
+                              style: TextStyle(
+                                color: Color(0xFFAAA4AB),
+                                fontSize: 12,
                           ),
                         ),
                       ],
@@ -205,6 +214,20 @@ class _SearchScreenState extends State<SearchScreen> {
                     .toList(),
               ),
             ),
+            if (_results.isNotEmpty && _controller.text.trim().isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: _MobileFeaturedBanner(
+                  item: _results.first,
+                  imageUrl: resolveMediaUrl(
+                    widget.appState.serverUrl,
+                    _results.first.backdrop?.isNotEmpty == true
+                        ? _results.first.backdrop!
+                        : _results.first.poster,
+                  ),
+                  onTap: () => _openDetail(_results.first),
+                ),
+              ),
             const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -310,11 +333,18 @@ class _MediaCard extends StatelessWidget {
                 DecoratedBox(
                   decoration: BoxDecoration(
                     color: AppColors.surfaceRaised,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(13),
                     border: Border.all(color: theme.colorScheme.outlineVariant),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x30000000),
+                        blurRadius: 16,
+                        offset: Offset(0, 8),
+                      ),
+                    ],
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(7),
+                    borderRadius: BorderRadius.circular(12),
                     child: imageUrl.isEmpty
                         ? const _PosterFallback()
                         : CachedNetworkImage(
@@ -333,7 +363,7 @@ class _MediaCard extends StatelessWidget {
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: const Color(0xD908090B),
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: const Color(0x44343941)),
                       ),
                       child: Padding(
@@ -389,6 +419,97 @@ class _PosterFallback extends StatelessWidget {
           Icons.movie_outlined,
           color: Theme.of(context).colorScheme.onSurfaceVariant,
           size: 34,
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileFeaturedBanner extends StatelessWidget {
+  final MediaItem item;
+  final String imageUrl;
+  final VoidCallback onTap;
+
+  const _MobileFeaturedBanner({
+    required this.item,
+    required this.imageUrl,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PressableScale(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      semanticLabel: item.title,
+      child: SizedBox(
+        height: 172,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0x22343F48)),
+            image: imageUrl.isEmpty
+                ? null
+                : DecorationImage(
+                    image: CachedNetworkImageProvider(imageUrl),
+                    fit: BoxFit.cover,
+                  ),
+            gradient: const LinearGradient(
+              begin: Alignment.topRight,
+              end: Alignment.bottomLeft,
+              colors: [Color(0xFF22312F), Color(0xFF11151A)],
+            ),
+          ),
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              borderRadius: BorderRadius.all(Radius.circular(16)),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0x110B0D10), Color(0xE80B0D10)],
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  const Text(
+                    '开放影院精选',
+                    style: TextStyle(
+                      color: AppColors.secondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    [item.year, item.quality, item.remarks]
+                        .whereType<String>()
+                        .where((value) => value.isNotEmpty)
+                        .join('  ·  '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

@@ -158,85 +158,114 @@ class _DetailScreenState extends State<DetailScreen> {
 
     final lines = item.playLines ?? [];
     final sourceCount = item.alternatives?.length ?? 1;
+    final posterUrl = resolveMediaUrl(widget.appState.serverUrl, item.poster);
+    final backdropUrl = resolveMediaUrl(
+      widget.appState.serverUrl,
+      item.backdrop?.isNotEmpty == true ? item.backdrop! : item.poster,
+    );
     return ListView(
       key: const ValueKey('content'),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      padding: const EdgeInsets.only(bottom: 34),
       children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final posterWidth = constraints.maxWidth < 360 ? 106.0 : 122.0;
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                    width: posterWidth,
-                    height: posterWidth * 1.42,
-                    child: item.poster.isEmpty
-                        ? const _DetailPosterFallback()
-                        : CachedNetworkImage(
-                            imageUrl: resolveMediaUrl(
-                              widget.appState.serverUrl,
-                              item.poster,
-                            ),
-                            fit: BoxFit.cover,
-                            placeholder: (_, _) =>
-                                const _DetailPosterFallback(),
-                            errorWidget: (_, _, _) =>
-                                const _DetailPosterFallback(),
-                          ),
+        SizedBox(
+          height: 360,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (backdropUrl.isNotEmpty)
+                Image(
+                  image: CachedNetworkImageProvider(backdropUrl),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const _DetailBackdropFallback(),
+                )
+              else
+                const _DetailBackdropFallback(),
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x220B0D10), Color(0xF50B0D10)],
+                    stops: [0.18, 1],
                   ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 44, 18, 22),
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(
-                        item.title,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 22,
-                          height: 1.18,
-                          fontWeight: FontWeight.w800,
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: SizedBox(
+                          width: 118,
+                          height: 168,
+                          child: posterUrl.isEmpty
+                              ? const _DetailPosterFallback()
+                              : CachedNetworkImage(
+                                  imageUrl: posterUrl,
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, _) =>
+                                      const _DetailPosterFallback(),
+                                  errorWidget: (_, _, _) =>
+                                      const _DetailPosterFallback(),
+                                ),
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          if (item.year?.isNotEmpty == true)
-                            _MetadataChip(item.year!),
-                          if (item.area?.isNotEmpty == true)
-                            _MetadataChip(item.area!),
-                          if (item.remarks?.isNotEmpty == true)
-                            _MetadataChip(item.remarks!),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        '$sourceCount 个来源 · ${item.sourceName}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: theme.colorScheme.secondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              item.title,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 28,
+                                height: 1.08,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                if (item.year?.isNotEmpty == true)
+                                  _MetadataChip(item.year!),
+                                if (item.area?.isNotEmpty == true)
+                                  _MetadataChip(item.area!),
+                                if (item.remarks?.isNotEmpty == true)
+                                  _MetadataChip(item.remarks!),
+                              ],
+                            ),
+                            const SizedBox(height: 9),
+                            Text(
+                              '$sourceCount 个来源 · ${item.sourceName}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: theme.colorScheme.secondary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
-            );
-          },
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 18),
-        SizedBox(
-          width: double.infinity,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
           child: FilledButton.icon(
             onPressed: lines.isEmpty ? null : _play,
             icon: const Icon(Icons.play_arrow_rounded),
@@ -245,33 +274,51 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
           ),
         ),
+        SizedBox(
+          height: 2,
+        ),
         if (item.summary?.isNotEmpty == true) ...[
-          const SizedBox(height: 24),
-          const SectionHeading(title: '简介'),
-          const SizedBox(height: 8),
-          Text(
-            item.summary!,
-            style: TextStyle(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.55,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 26, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SectionHeading(title: '简介'),
+                const SizedBox(height: 8),
+                Text(
+                  item.summary!,
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.55,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
-        if (item.actors?.isNotEmpty == true ||
-            item.director?.isNotEmpty == true) ...[
-          const SizedBox(height: 14),
-          if (item.actors?.isNotEmpty == true)
-            _CreditLine(label: '演员', value: item.actors!),
-          if (item.director?.isNotEmpty == true)
-            _CreditLine(label: '导演', value: item.director!),
-        ],
+        if (item.actors?.isNotEmpty == true || item.director?.isNotEmpty == true)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (item.actors?.isNotEmpty == true)
+                  _CreditLine(label: '演员', value: item.actors!),
+                if (item.director?.isNotEmpty == true)
+                  _CreditLine(label: '导演', value: item.director!),
+              ],
+            ),
+          ),
         if (lines.length > 1) ...[
-          const SizedBox(height: 24),
-          SectionHeading(title: '线路', detail: '${lines.length} 条可用线路'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 26, 16, 0),
+            child: SectionHeading(title: '线路', detail: '${lines.length} 条可用线路'),
+          ),
           const SizedBox(height: 10),
           SizedBox(
             height: 42,
             child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               scrollDirection: Axis.horizontal,
               itemCount: lines.length,
               separatorBuilder: (_, _) => const SizedBox(width: 8),
@@ -290,13 +337,17 @@ class _DetailScreenState extends State<DetailScreen> {
           ),
         ],
         if (lines.isNotEmpty && _lineIndex < lines.length) ...[
-          const SizedBox(height: 24),
-          SectionHeading(
-            title: '剧集',
-            detail: '${lines[_lineIndex].episodes.length} 集',
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 26, 16, 0),
+            child: SectionHeading(
+              title: '剧集',
+              detail: '${lines[_lineIndex].episodes.length} 集',
+            ),
           ),
           const SizedBox(height: 10),
-          GridView.builder(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -332,6 +383,7 @@ class _DetailScreenState extends State<DetailScreen> {
                 ),
               );
             },
+            ),
           ),
         ],
       ],
@@ -398,6 +450,24 @@ class _CreditLine extends StatelessWidget {
         ),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+}
+
+class _DetailBackdropFallback extends StatelessWidget {
+  const _DetailBackdropFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppColors.surfaceHighest, AppColors.background],
+        ),
       ),
     );
   }

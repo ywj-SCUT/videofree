@@ -69,6 +69,15 @@ class SectionHeading extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     return Row(
       children: [
+        Container(
+          width: 3,
+          height: 19,
+          decoration: BoxDecoration(
+            color: colors.primary,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 9),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
