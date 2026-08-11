@@ -19,7 +19,9 @@ const requestedSources = process.argv.slice(2).map((entry, index) => {
     searchable: true,
   };
 });
-const sources = requestedSources.length ? requestedSources : DEFAULT_SOURCES;
+// Disabled built-ins (for example token-gated short-video providers) are not
+// part of the default playback surface and should not fail the source probe.
+const sources = requestedSources.length ? requestedSources : DEFAULT_SOURCES.filter((source) => source.enabled);
 
 function streamUrl(port, target) {
   return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(target)}`;

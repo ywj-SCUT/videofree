@@ -45,22 +45,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _preferenceApplied = false;
   double _playbackRate = 1.0;
 
+  static const _speedOptions = [1.0, 1.5, 2.0];
+
+  String _rateLabel(double rate) {
+    if (rate == rate.roundToDouble()) return '${rate.round()}x';
+    return '$rate x';
+  }
+
   @override
   void initState() {
     super.initState();
     _lineIndex = widget.lineIndex;
     _episodeIndex = widget.episodeIndex;
-    _player = Player();
+    _player = Player(
+      configuration: const PlayerConfiguration(
+        bufferSize: 64 * 1024 * 1024,
+      ),
+    );
     _videoController = VideoController(_player);
     _tracksSubscription = _player.stream.tracks.listen(_handleTracks);
     _trackSubscription = _player.stream.track.listen((track) {
       if (mounted) setState(() => _selectedTrackId = track.video.id);
     });
+    _configureMpvCache();
     _openCurrent();
     _saveTimer = Timer.periodic(
       const Duration(seconds: 5),
       (_) => _saveProgress(),
     );
+  }
+
+  Future<void> _configureMpvCache() async {
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      await platform.setProperty('cache-secs', '30');
+      await platform.setProperty('demuxer-readahead-secs', '10');
+      await platform.setProperty('cache-pause-wait', '1');
+    }
   }
 
   Episode get _current => widget.playLines[_lineIndex].episodes[_episodeIndex];
@@ -83,6 +104,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     await _player.setVideoTrack(track);
     if (mounted) setState(() => _selectedTrackId = track.id);
   }
+
   Future<void> _setPlaybackRate(double rate) async {
     HapticFeedback.selectionClick();
     await _player.setRate(rate);
@@ -111,6 +133,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         headers = resolved.headers;
       }
       await _player.open(Media(url, httpHeaders: headers));
+      await _player.setRate(_playbackRate);
       final resume = widget.appState.getResume(widget.item);
       if (resume != null &&
           resume.episodeName == _current.name &&
@@ -230,12 +253,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 const Icon(Icons.speed_rounded, size: 18),
                 const SizedBox(width: 2),
                 Text(
-                    '$_playbackRate' 'x',
-                    style: const TextStyle(fontSize: 12)),
+                  _rateLabel(_playbackRate),
+                  style: const TextStyle(fontSize: 12),
+                ),
               ],
             ),
             onSelected: _setPlaybackRate,
-            itemBuilder: (context) => [1.0, 1.5, 2.0]
+            itemBuilder: (context) => _speedOptions
                 .map(
                   (rate) => PopupMenuItem(
                     value: rate,
@@ -244,11 +268,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         SizedBox(
                           width: 26,
                           child: rate == _playbackRate
-                              ? Icon(Icons.check_rounded,
-                                  size: 18, color: colors.primary)
+                              ? Icon(
+                                  Icons.check_rounded,
+                                  size: 18,
+                                  color: colors.primary,
+                                )
                               : null,
                         ),
-                        Text('${rate.toStringAsFixed(1)}x'),
+                        Text(_rateLabel(rate)),
                       ],
                     ),
                   ),

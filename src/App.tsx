@@ -659,6 +659,8 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
   const [danmakuVisible, setDanmakuVisible] = useState(true);
   const [resumedAt, setResumedAt] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [speedLabel, setSpeedLabel] = useState('1x');
+  const speedRef = useRef(1);
   const current = lines[lineIndex]?.episodes[episodeIndex];
 
   useEffect(() => {
@@ -693,7 +695,7 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
           fullscreen: true,
           fullscreenWeb: true,
           pip: true,
-          playbackRate: [1, 1.5, 2] as unknown as boolean,
+          playbackRate: false,
           aspectRatio: true,
           setting: true,
           hotkey: true,
@@ -728,6 +730,28 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
             },
           },
         });
+        const currentSpeed = speedRef.current;
+        const speedLabelStr = currentSpeed === 1 ? '1x' : currentSpeed === 1.5 ? '1.5x' : '2x';
+        if (instance.setting.find('videoget-speed')) instance.setting.remove('videoget-speed');
+        instance.setting.add({
+          name: 'videoget-speed',
+          html: '倍速',
+          tooltip: speedLabelStr,
+          selector: [
+            { html: '1x', value: 1, default: currentSpeed === 1 },
+            { html: '1.5x', value: 1.5, default: currentSpeed === 1.5 },
+            { html: '2x', value: 2, default: currentSpeed === 2 },
+          ],
+          onSelect(item) {
+            instance!.playbackRate = Number(item.value);
+            speedRef.current = Number(item.value);
+            if (item.$parent?.$tooltip) item.$parent.$tooltip.textContent = String(item.html);
+            setSpeedLabel(String(item.html));
+            return item.html;
+          },
+        });
+        instance.playbackRate = currentSpeed;
+        setSpeedLabel(speedLabelStr);
         instance.on('video:timeupdate', () => {
           if (Date.now() - lastSaved > 5000) {
             lastSaved = Date.now();
@@ -769,7 +793,7 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
       <header className="detail-topbar"><button className="icon-button" aria-label="关闭详情" title="关闭详情" onClick={onClose}><X size={20} /></button></header>
       <div className="detail-main"><div className="detail-poster-large"><img src={imageUrl(item.poster, settings.proxyPort, 540, 810)} alt={item.title} /></div><div className="detail-copy-large"><span className="detail-kicker">{item.sourceName} · {item.category === 'series' ? '剧集' : item.category === 'movie' ? '电影' : item.category === 'anime' ? '动漫' : '精选内容'}</span><h2>{item.title}</h2><div className="detail-meta">{[item.year, item.area, item.quality, item.remarks].filter(Boolean).map((value) => <span key={value}>{value}</span>)}</div><p>{item.summary || '选择播放线路，开始观看这部作品。'}</p>{(item.actors || item.director) && <div className="detail-credits">{item.actors && <span><strong>主演</strong>{item.actors}</span>}{item.director && <span><strong>导演</strong>{item.director}</span>}</div>}<div className="detail-actions"><button className="primary-button detail-start" onClick={() => setPlaying(true)}><Play size={18} fill="currentColor" />{resume ? '继续播放' : '立即播放'}</button><button className={isFavorite ? 'detail-favorite active' : 'detail-favorite'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={20} fill={isFavorite ? 'currentColor' : 'none'} /></button></div></div></div>
       <div className="detail-selection"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div>
-    </div> : <><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title} · {current.name}</h2></div><div><small className="player-status">{qualityLabel}</small><small className="player-status danmaku-status">{danmakuLabel}</small><button className={danmakuVisible ? 'icon-button active' : 'icon-button'} aria-label={danmakuVisible ? '关闭弹幕' : '开启弹幕'} title={danmakuVisible ? '关闭弹幕' : '开启弹幕'} onClick={toggleDanmaku}>{danmakuVisible ? <Captions size={18} /> : <CaptionsOff size={18} />}</button><button className={isFavorite ? 'icon-button active' : 'icon-button'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" aria-label="返回详情" title="返回详情" onClick={() => setPlaying(false)}><X size={20} /></button></div></header><div className={item.category === 'short' || item.category === 'ai-short' ? 'player-stage vertical-mode' : 'player-stage'} ref={container} />{resumedAt > 0 && <div className="resume-notice"><Clock3 size={14} />已从 {formatTime(resumedAt)} 继续播放</div>}<div className="player-controls"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div></>}
+    </div> : <><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title} · {current.name}</h2></div><div><small className="player-status">{qualityLabel}</small><small className="player-status">{speedLabel}</small><small className="player-status danmaku-status">{danmakuLabel}</small><button className={danmakuVisible ? 'icon-button active' : 'icon-button'} aria-label={danmakuVisible ? '关闭弹幕' : '开启弹幕'} title={danmakuVisible ? '关闭弹幕' : '开启弹幕'} onClick={toggleDanmaku}>{danmakuVisible ? <Captions size={18} /> : <CaptionsOff size={18} />}</button><button className={isFavorite ? 'icon-button active' : 'icon-button'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" aria-label="返回详情" title="返回详情" onClick={() => setPlaying(false)}><X size={20} /></button></div></header><div className={item.category === 'short' || item.category === 'ai-short' ? 'player-stage vertical-mode' : 'player-stage'} ref={container} />{resumedAt > 0 && <div className="resume-notice"><Clock3 size={14} />已从 {formatTime(resumedAt)} 继续播放</div>}<div className="player-controls"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div></>}
   </section></div>;
 }
 

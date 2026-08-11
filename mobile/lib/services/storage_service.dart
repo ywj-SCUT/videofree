@@ -56,6 +56,38 @@ class StorageService {
       'enabled': true,
       'searchable': true,
     },
+    {
+      'id': 'builtin-line-c',
+      'name': '默认线路 C',
+      'type': 'cms',
+      'api': 'https://cj.lziapi.com/api.php/provide/vod/',
+      'enabled': true,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-line-d',
+      'name': '默认线路 D',
+      'type': 'cms',
+      'api': 'https://api.ukuapi.com/api.php/provide/vod/',
+      'enabled': true,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-line-e',
+      'name': '默认线路 E',
+      'type': 'cms',
+      'api': 'https://api.wujinapi.me/api.php/provide/vod/',
+      'enabled': true,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-line-f',
+      'name': '默认线路 F',
+      'type': 'cms',
+      'api': 'https://cj.rycjapi.com/api.php/provide/vod/',
+      'enabled': true,
+      'searchable': true,
+    },
   ];
 
   Future<List<CmsSource>> getSources() async {
