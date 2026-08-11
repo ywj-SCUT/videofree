@@ -3,9 +3,10 @@ import Artplayer from 'artplayer';
 import artplayerPluginDanmuku, { type Result as DanmakuPlugin } from 'artplayer-plugin-danmuku';
 import Hls from 'hls.js';
 import {
-  Captions, CaptionsOff, Check, ChevronDown, Clapperboard, Clock3, Compass, Film, Heart, Info,
-  KeyRound, LoaderCircle, Maximize2, Minimize2, Minus, MonitorPlay, Pause, Play, Plus, Search,
-  Settings, Sparkles, Star, Trash2, Upload, Volume2, VolumeX, X,
+  ArrowDownUp, Captions, CaptionsOff, Check, ChevronDown, Clapperboard, Clock3, Compass, Film,
+  Grid2X2, Heart, Info, KeyRound, LibraryBig, LoaderCircle, Maximize2, Minimize2, Minus,
+  MonitorPlay, Pause, Play, Plus, Search, Settings, Sparkles, Star, Trash2, Upload, Volume2,
+  VolumeX, X,
 } from 'lucide-react';
 import type { AppSettings, CmsSource, DanmakuProvider, HistoryItem, LibraryState, MediaCategory, MediaItem, SearchResponse } from './types';
 
@@ -291,7 +292,7 @@ function App() {
       </aside>
 
       <main className="main-content">
-        {view === 'discover' && <Discover items={items} loading={loading} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} onSearch={() => navigate('search')} proxyPort={settings.proxyPort} />}
+        {view === 'discover' && <Discover items={items} loading={loading} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} onSearch={() => navigate('search')} onFavorites={() => navigate('favorites')} proxyPort={settings.proxyPort} />}
         {view === 'search' && (
           <SearchView query={query} setQuery={setQuery} category={category} setCategory={setCategory} items={items} loading={loading}
             meta={searchMeta} onOpen={openMedia} favoriteKeys={favoriteKeys} onFavorite={toggleFavorite} proxyPort={settings.proxyPort} />
@@ -314,15 +315,31 @@ function TitleBar() {
   return <div className="titlebar"><span>VideoGET</span><div className="window-actions"><button onClick={() => window.lumen.minimize()}><Minus size={14} /></button><button onClick={() => window.lumen.maximize()}><Maximize2 size={13} /></button><button className="close" onClick={() => window.lumen.close()}><X size={15} /></button></div></div>;
 }
 
-function Discover({ items, loading, onOpen, favoriteKeys, onFavorite, onSearch, proxyPort }: MediaGridProps & { onSearch: () => void }) {
-  const featured = items[0];
-  return <div className="page discover-page">
-    <header className="page-header"><div><span className="eyebrow">今晚看什么</span><h1>发现好内容</h1></div><button className="search-launcher" onClick={onSearch}><Search size={17} /><span>搜索电影、剧集、动漫、短视频</span><kbd>Ctrl K</kbd></button></header>
-    {featured && <section className="featured" style={{ backgroundImage: `linear-gradient(90deg, rgba(8,8,10,.94) 0%, rgba(8,8,10,.6) 48%, rgba(8,8,10,.12) 100%), url("${imageUrl(featured.backdrop ?? featured.poster, proxyPort, 1600, 900)}")` }}>
-      <div className="featured-content"><span className="featured-kicker">开放影院精选</span><h2>{featured.title}</h2><p>{featured.summary}</p><div className="featured-meta"><span>{featured.year}</span><span>{featured.quality}</span><span>{featured.remarks}</span></div><button className="primary-button" onClick={() => onOpen(featured)}><Play size={17} fill="currentColor" />立即播放</button></div>
-    </section>}
-    <SectionHeader title="最近精选" subtitle="开放内容与已配置来源" />
-    <MediaGrid items={items} loading={loading} onOpen={onOpen} favoriteKeys={favoriteKeys} onFavorite={onFavorite} proxyPort={proxyPort} />
+function Discover({ items, loading, onOpen, favoriteKeys, onFavorite, onSearch, onFavorites, proxyPort }: MediaGridProps & { onSearch: () => void; onFavorites: () => void }) {
+  const [source, setSource] = useState('all');
+  const [mediaType, setMediaType] = useState<MediaCategory>('all');
+  const [sort, setSort] = useState<'recent' | 'year' | 'title'>('recent');
+  const sources = useMemo(() => [...new Map(items.map((item) => [item.sourceId, item.sourceName])).entries()], [items]);
+  const visibleItems = useMemo(() => {
+    const filtered = items.filter((item) => (source === 'all' || item.sourceId === source) && (mediaType === 'all' || item.category === mediaType));
+    if (sort === 'title') return [...filtered].sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'));
+    if (sort === 'year') return [...filtered].sort((a, b) => Number(b.year ?? 0) - Number(a.year ?? 0));
+    return filtered;
+  }, [items, mediaType, sort, source]);
+
+  return <div className="page discover-page library-page">
+    <header className="library-toolbar">
+      <div><span className="eyebrow">本地优先 · 多源聚合</span><h1>媒体库</h1><p>浏览、筛选并直接打开已聚合的影视内容</p></div>
+      <button className="search-launcher" onClick={onSearch}><Search size={18} /><span>搜索片名、演员或关键词</span><kbd>Ctrl K</kbd></button>
+    </header>
+    <div className="library-filters" aria-label="媒体库筛选">
+      <label className="filter-control"><LibraryBig size={17} /><span>片库</span><select aria-label="选择片库" value={source} onChange={(event) => setSource(event.target.value)}><option value="all">全部来源</option>{sources.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select><ChevronDown size={15} /></label>
+      <label className="filter-control"><Grid2X2 size={17} /><span>类型</span><select aria-label="选择类型" value={mediaType} onChange={(event) => setMediaType(event.target.value as MediaCategory)}>{categories.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select><ChevronDown size={15} /></label>
+      <button className="filter-action" onClick={onFavorites}><Heart size={17} /><span>我的收藏</span>{favoriteKeys.size > 0 && <small>{favoriteKeys.size}</small>}</button>
+      <label className="filter-control"><ArrowDownUp size={17} /><span>排序</span><select aria-label="选择排序方式" value={sort} onChange={(event) => setSort(event.target.value as 'recent' | 'year' | 'title')}><option value="recent">聚合顺序</option><option value="year">年份从新到旧</option><option value="title">片名排序</option></select><ChevronDown size={15} /></label>
+      <span className="library-count">{loading ? '正在聚合来源...' : `${visibleItems.length} 部作品`}</span>
+    </div>
+    <MediaGrid items={visibleItems} loading={loading} onOpen={onOpen} favoriteKeys={favoriteKeys} onFavorite={onFavorite} proxyPort={proxyPort} />
   </div>;
 }
 
@@ -603,7 +620,7 @@ interface MediaGridProps { items: MediaItem[]; loading: boolean; onOpen: (item: 
 function MediaGrid({ items, loading, onOpen, favoriteKeys, onFavorite, proxyPort }: MediaGridProps) {
   if (loading && !items.length) return <LoadingGrid />;
   if (!items.length) return <EmptyState icon={Search} title="没有找到相关内容" text="换个关键词，或在设置中添加更多视频来源。" />;
-  return <div className="media-grid">{items.map((item) => { const sourceCount = item.alternatives?.length ?? 1; return <article className="media-card" key={`${item.sourceId}:${item.id}`}><button className="poster-button" onClick={() => onOpen(item)}><img src={imageUrl(item.poster, proxyPort, 800, 1200)} alt={item.title} loading="lazy" /><span className="poster-shade" /><span className="play-button"><Play size={20} fill="currentColor" /></span>{item.quality && <span className="quality-badge">{item.quality}</span>}<span className="source-badge">{sourceCount > 1 ? `${sourceCount} 个来源` : item.sourceName}</span></button><div className="media-info"><button onClick={() => onOpen(item)}><strong>{item.title}</strong><span>{[item.year, item.remarks].filter(Boolean).join(' · ')}</span></button><button className={favoriteKeys.has(`${item.sourceId}:${item.id}`) ? 'heart-button active' : 'heart-button'} onClick={() => onFavorite(item)}><Heart size={16} fill={favoriteKeys.has(`${item.sourceId}:${item.id}`) ? 'currentColor' : 'none'} /></button></div></article>; })}</div>;
+  return <div className="media-grid">{items.map((item) => { const sourceCount = item.alternatives?.length ?? 1; const favorite = favoriteKeys.has(`${item.sourceId}:${item.id}`); return <article className="media-card" key={`${item.sourceId}:${item.id}`}><button className="poster-button" onClick={() => onOpen(item)}><img src={imageUrl(item.poster, proxyPort, 800, 1200)} alt={item.title} loading="lazy" /><span className="poster-shade" /><span className="play-button"><Play size={20} fill="currentColor" /></span>{item.quality && <span className="quality-badge">{item.quality}</span>}<span className="source-badge">{sourceCount > 1 ? `${sourceCount} 个来源` : item.sourceName}</span></button><div className="media-info"><button onClick={() => onOpen(item)}><strong>{item.title}</strong><span>{[item.year, item.remarks].filter(Boolean).join(' · ')}</span></button><button aria-label={favorite ? `取消收藏 ${item.title}` : `收藏 ${item.title}`} title={favorite ? '取消收藏' : '收藏'} className={favorite ? 'heart-button active' : 'heart-button'} onClick={() => onFavorite(item)}><Heart size={16} fill={favorite ? 'currentColor' : 'none'} /></button></div></article>; })}</div>;
 }
 
 function LoadingGrid() { return <div className="media-grid">{Array.from({ length: 10 }, (_, index) => <div className="media-card skeleton" key={index}><div className="skeleton-poster" /><div className="skeleton-line" /><div className="skeleton-line short" /></div>)}</div>; }
@@ -626,10 +643,11 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
   const [danmakuLabel, setDanmakuLabel] = useState('正在匹配弹幕');
   const [danmakuVisible, setDanmakuVisible] = useState(true);
   const [resumedAt, setResumedAt] = useState(0);
+  const [playing, setPlaying] = useState(false);
   const current = lines[lineIndex]?.episodes[episodeIndex];
 
   useEffect(() => {
-    if (!container.current || !current) return;
+    if (!playing || !container.current || !current) return;
     setQualityLabel('检测画质');
     setDanmakuLabel('正在匹配弹幕');
     setDanmakuVisible(true);
@@ -721,7 +739,7 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
       }
     })();
     return () => { active = false; saveProgress(); instance?.destroy(false); player.current = null; };
-  }, [current?.url, current?.sourceId, lineIndex, episodeIndex, settings.proxyPort, settings.proxyBaseUrl, settings.adFiltering, settings.qualityPreference, onProgress]);
+  }, [current?.url, current?.sourceId, lineIndex, episodeIndex, settings.proxyPort, settings.proxyBaseUrl, settings.adFiltering, settings.qualityPreference, playing, onProgress]);
 
   const toggleDanmaku = () => {
     const plugin = player.current?.plugins.artplayerPluginDanmuku as DanmakuPlugin | undefined;
@@ -730,8 +748,13 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
     setDanmakuVisible(!danmakuVisible);
   };
 
-  return <div className="player-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="player-sheet"><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title}</h2></div><div><small className="player-status">{qualityLabel}</small><small className="player-status danmaku-status">{danmakuLabel}</small><button className={danmakuVisible ? 'icon-button active' : 'icon-button'} aria-label={danmakuVisible ? '关闭弹幕' : '开启弹幕'} title={danmakuVisible ? '关闭弹幕' : '开启弹幕'} onClick={toggleDanmaku}>{danmakuVisible ? <Captions size={18} /> : <CaptionsOff size={18} />}</button><button className={isFavorite ? 'icon-button active' : 'icon-button'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" aria-label="关闭播放器" title="关闭播放器" onClick={onClose}><X size={20} /></button></div></header>
-    {current ? <><div className="detail-hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(10,11,14,.96) 0%, rgba(10,11,14,.78) 48%, rgba(10,11,14,.25) 100%), url("${imageUrl(item.backdrop ?? item.poster, settings.proxyPort, 1500, 840)}")` }}><div className="detail-poster"><img src={imageUrl(item.poster, settings.proxyPort, 420, 630)} alt="" /></div><div className="detail-copy"><span className="detail-kicker">{item.sourceName} · {item.category === 'series' ? '剧集' : item.category === 'movie' ? '电影' : '精选内容'}</span><h3>{item.title}</h3><div className="detail-meta">{[item.year, item.area, item.quality, item.remarks].filter(Boolean).map((value) => <span key={value}>{value}</span>)}</div><p>{item.summary || '打开线路，开始播放这部作品。'}</p><button className="primary-button detail-play" onClick={() => player.current?.play()}><Play size={16} fill="currentColor" />继续播放</button></div></div><div className={item.category === 'short' || item.category === 'ai-short' ? 'player-stage vertical-mode' : 'player-stage'} ref={container} />{resumedAt > 0 && <div className="resume-notice"><Clock3 size={14} />已从 {formatTime(resumedAt)} 继续播放</div>}<div className="player-controls"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div></> : <EmptyState icon={Film} title="暂无可播放线路" text="当前来源没有返回有效播放地址，请尝试其他来源。" />}
+  return <div className="player-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="player-sheet detail-sheet">
+    {!current ? <><button className="detail-close icon-button" aria-label="关闭详情" title="关闭详情" onClick={onClose}><X size={20} /></button><EmptyState icon={Film} title="暂无可播放线路" text="当前来源没有返回有效播放地址，请尝试其他来源。" /></> : !playing ? <div className="detail-surface" style={{ backgroundImage: `url("${imageUrl(item.backdrop ?? item.poster, settings.proxyPort, 1800, 1000)}")` }}>
+      <div className="detail-surface-shade" />
+      <header className="detail-topbar"><button className="icon-button" aria-label="关闭详情" title="关闭详情" onClick={onClose}><X size={20} /></button></header>
+      <div className="detail-main"><div className="detail-poster-large"><img src={imageUrl(item.poster, settings.proxyPort, 540, 810)} alt={item.title} /></div><div className="detail-copy-large"><span className="detail-kicker">{item.sourceName} · {item.category === 'series' ? '剧集' : item.category === 'movie' ? '电影' : item.category === 'anime' ? '动漫' : '精选内容'}</span><h2>{item.title}</h2><div className="detail-meta">{[item.year, item.area, item.quality, item.remarks].filter(Boolean).map((value) => <span key={value}>{value}</span>)}</div><p>{item.summary || '选择播放线路，开始观看这部作品。'}</p>{(item.actors || item.director) && <div className="detail-credits">{item.actors && <span><strong>主演</strong>{item.actors}</span>}{item.director && <span><strong>导演</strong>{item.director}</span>}</div>}<div className="detail-actions"><button className="primary-button detail-start" onClick={() => setPlaying(true)}><Play size={18} fill="currentColor" />{resume ? '继续播放' : '立即播放'}</button><button className={isFavorite ? 'detail-favorite active' : 'detail-favorite'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={20} fill={isFavorite ? 'currentColor' : 'none'} /></button></div></div></div>
+      <div className="detail-selection"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div>
+    </div> : <><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title} · {current.name}</h2></div><div><small className="player-status">{qualityLabel}</small><small className="player-status danmaku-status">{danmakuLabel}</small><button className={danmakuVisible ? 'icon-button active' : 'icon-button'} aria-label={danmakuVisible ? '关闭弹幕' : '开启弹幕'} title={danmakuVisible ? '关闭弹幕' : '开启弹幕'} onClick={toggleDanmaku}>{danmakuVisible ? <Captions size={18} /> : <CaptionsOff size={18} />}</button><button className={isFavorite ? 'icon-button active' : 'icon-button'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" aria-label="返回详情" title="返回详情" onClick={() => setPlaying(false)}><X size={20} /></button></div></header><div className={item.category === 'short' || item.category === 'ai-short' ? 'player-stage vertical-mode' : 'player-stage'} ref={container} />{resumedAt > 0 && <div className="resume-notice"><Clock3 size={14} />已从 {formatTime(resumedAt)} 继续播放</div>}<div className="player-controls"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div></>}
   </section></div>;
 }
 
