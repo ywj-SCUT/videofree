@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
 import artplayerPluginDanmuku, { type Result as DanmakuPlugin } from 'artplayer-plugin-danmuku';
-import Hls from 'hls.js';
+import Hls, { ErrorDetails, ErrorTypes } from 'hls.js';
 import {
   ArrowDownUp, Captions, CaptionsOff, Check, ChevronDown, Clapperboard, Clock3, Compass, Film,
   Grid2X2, Heart, Info, KeyRound, LibraryBig, LoaderCircle, Maximize2, Minimize2, Minus,
@@ -29,7 +29,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof Compass }> = [
   { id: 'history', label: '观看记录', icon: Clock3 },
 ];
 
-const emptySettings: AppSettings = { sources: [], danmakuProviders: [], adFiltering: true, qualityPreference: 'highest', proxyPort: 0 };
+const emptySettings: AppSettings = { sources: [], danmakuProviders: [], adFiltering: true, qualityPreference: 'auto', proxyPort: 0 };
 const emptyLibrary: LibraryState = { favorites: [], history: [] };
 
 type QualityPreference = AppSettings['qualityPreference'];
@@ -49,11 +49,18 @@ function preferredLevel(levels: Hls['levels'], preference: QualityPreference): n
     return level.height > bestLevel.height || (level.height === bestLevel.height && level.bitrate > bestLevel.bitrate) ? index : best;
   }, 0);
   const target = preference === '1080p' ? 1080 : 720;
-  return levels.reduce((best, level, index) => {
-    const distance = Math.abs((level.height || target) - target);
-    const bestDistance = Math.abs((levels[best].height || target) - target);
-    return distance < bestDistance || (distance === bestDistance && level.bitrate > levels[best].bitrate) ? index : best;
-  }, 0);
+  const candidates = levels
+    .map((level, index) => ({ level, index }))
+    .filter(({ level }) => level.height > 0 && level.height <= target);
+  const pool = candidates.length ? candidates : levels.map((level, index) => ({ level, index }));
+  return pool.reduce((best, current) => {
+    if (candidates.length) {
+      return current.level.height > best.level.height || (current.level.height === best.level.height && current.level.bitrate > best.level.bitrate) ? current : best;
+    }
+    const currentHeight = current.level.height || Number.MAX_SAFE_INTEGER;
+    const bestHeight = best.level.height || Number.MAX_SAFE_INTEGER;
+    return currentHeight < bestHeight || (currentHeight === bestHeight && current.level.bitrate < best.level.bitrate) ? current : best;
+  }).index;
 }
 
 function attachHls(video: HTMLVideoElement, sourceUrl: string, art: Artplayer, preference: QualityPreference, onQuality?: (label: string) => void, lowLatencyMode = false): void {
@@ -65,36 +72,77 @@ function attachHls(video: HTMLVideoElement, sourceUrl: string, art: Artplayer, p
     enableWorker: true,
     lowLatencyMode,
     maxBufferLength: 30,
-    maxMaxBufferLength: 60,
+    maxMaxBufferLength: 90,
+    maxBufferSize: 96 * 1024 * 1024,
     backBufferLength: 30,
+    startFragPrefetch: true,
     fragLoadingMaxRetry: 6,
     fragLoadingRetryDelay: 500,
+    fragLoadingTimeOut: 30_000,
     manifestLoadingMaxRetry: 3,
     levelLoadingMaxRetry: 3,
     startLevel: -1,
-    capLevelToPlayerSize: true,
+    capLevelToPlayerSize: preference === 'auto',
     abrEwmaDefaultEstimate: 1_000_000,
-    abrBandWidthFactor: 0.95,
+    abrBandWidthFactor: 0.9,
     abrBandWidthUpFactor: 0.7,
   });
+  let adaptiveCap = -1;
+  let networkRecoveryCount = 0;
+  let mediaRecoveryCount = 0;
+  let stallTimes: number[] = [];
+
+  const adaptiveLabel = () => {
+    const active = hls.currentLevel >= 0 ? levelLabel(hls.levels[hls.currentLevel], hls.currentLevel) : '';
+    const cap = adaptiveCap >= 0 ? ` / 上限 ${levelLabel(hls.levels[adaptiveCap], adaptiveCap)}` : '';
+    return active ? `智能 · ${active}${cap}` : `智能适配${cap}`;
+  };
+  const enableAdaptiveMode = (cap: number, capToPlayerSize = false) => {
+    adaptiveCap = cap;
+    hls.capLevelToPlayerSize = capToPlayerSize;
+    hls.autoLevelCapping = cap;
+    hls.loadLevel = -1;
+    onQuality?.(adaptiveLabel());
+  };
+  const downgradeAfterStalls = () => {
+    const current = hls.currentLevel >= 0 ? hls.currentLevel : hls.nextAutoLevel;
+    if (current <= 0) return;
+    const nextCap = adaptiveCap >= 0 ? Math.min(adaptiveCap, current - 1) : current - 1;
+    hls.capLevelToPlayerSize = false;
+    hls.autoLevelCapping = nextCap;
+    hls.nextAutoLevel = nextCap;
+    hls.currentLevel = -1;
+    adaptiveCap = nextCap;
+    art.notice.show = `网络波动，已自动降至 ${levelLabel(hls.levels[nextCap], nextCap)} 以内`;
+    onQuality?.(adaptiveLabel());
+  };
+
   art.hls = hls;
   hls.loadSource(sourceUrl);
   hls.attachMedia(video);
   hls.on(Hls.Events.MANIFEST_PARSED, () => {
-    const selectedLevel = preferredLevel(hls.levels, preference);
-    hls.currentLevel = selectedLevel;
+    const preferredCap = preferredLevel(hls.levels, preference);
+    enableAdaptiveMode(preferredCap, preference === 'auto');
     const choices = [{ html: '自动', level: -1 }, ...hls.levels.map((level, index) => ({ html: levelLabel(level, index), level: index }))];
-    const selectedLabel = selectedLevel < 0 ? '自动' : levelLabel(hls.levels[selectedLevel], selectedLevel);
+    const selectedLabel = adaptiveLabel();
     if (art.setting.find('videoget-quality')) art.setting.remove('videoget-quality');
     art.setting.add({
       name: 'videoget-quality',
       html: '画质',
       tooltip: selectedLabel,
-      selector: choices.map((choice) => ({ ...choice, default: choice.level === selectedLevel })),
+      selector: choices.map((choice) => ({ ...choice, default: choice.level === -1 })),
       onSelect(item) {
-        hls.currentLevel = Number(item.level);
+        const level = Number(item.level);
+        if (level < 0) {
+          enableAdaptiveMode(preferredCap, preference === 'auto');
+        } else {
+          adaptiveCap = -1;
+          hls.capLevelToPlayerSize = false;
+          hls.autoLevelCapping = -1;
+          hls.currentLevel = level;
+        }
         if (item.$parent?.$tooltip) item.$parent.$tooltip.textContent = String(item.html);
-        onQuality?.(String(item.html));
+        onQuality?.(level < 0 ? adaptiveLabel() : String(item.html));
         return item.html;
       },
     });
@@ -102,7 +150,36 @@ function attachHls(video: HTMLVideoElement, sourceUrl: string, art: Artplayer, p
   });
   hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
     const label = levelLabel(hls.levels[data.level], data.level);
-    onQuality?.(hls.autoLevelEnabled ? `自动 · ${label}` : label);
+    onQuality?.(hls.autoLevelEnabled ? `智能 · ${label}` : label);
+  });
+  hls.on(Hls.Events.FRAG_LOADED, () => {
+    networkRecoveryCount = 0;
+  });
+  hls.on(Hls.Events.ERROR, (_event, data) => {
+    if (data.details === ErrorDetails.BUFFER_STALLED_ERROR) {
+      const now = Date.now();
+      stallTimes = [...stallTimes.filter((time) => now - time < 60_000), now];
+      if (stallTimes.length >= 2) {
+        stallTimes = [];
+        downgradeAfterStalls();
+      }
+    }
+    if (!data.fatal) return;
+    if (data.type === ErrorTypes.NETWORK_ERROR && networkRecoveryCount < 2) {
+      networkRecoveryCount++;
+      downgradeAfterStalls();
+      hls.startLoad(video.currentTime);
+      art.notice.show = '网络中断，正在续载';
+      return;
+    }
+    if (data.type === ErrorTypes.MEDIA_ERROR && mediaRecoveryCount < 2) {
+      mediaRecoveryCount++;
+      hls.recoverMediaError();
+      art.notice.show = '播放异常，正在恢复';
+      return;
+    }
+    art.notice.show = '当前线路持续加载失败，请切换线路重试';
+    hls.stopLoad();
   });
   art.on('destroy', () => hls.destroy());
 }
@@ -622,7 +699,7 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
         {settings.sources.map((source) => <div className="source-row" key={source.id}><button className={source.enabled ? 'toggle on' : 'toggle'} onClick={() => void saveSources(settings.sources.map((entry) => entry.id === source.id ? { ...entry, enabled: !entry.enabled } : entry))}><span /></button><div><strong>{source.name}</strong><small>{source.type === 'cms' ? source.api : source.type === 'short-api' ? `平台接口 · ${source.provider}` : 'Spider 规则'}</small>{testResult[source.id] && <em>{testResult[source.id]}</em>}</div><button className="text-button" onClick={() => void test(source)} disabled={testing === source.id}>{testing === source.id ? '检测中' : '检测'}</button>{!source.id.startsWith('builtin-') && <button className="icon-button danger" onClick={() => void saveSources(settings.sources.filter((entry) => entry.id !== source.id))}><Trash2 size={16} /></button>}</div>)}
       </div>
     </section>
-    <section className="settings-section"><div className="settings-heading"><div><h2>播放质量</h2><p>优先选择源提供的最高分辨率；实际画质由视频源决定。</p></div></div><div className="quality-options">{(['highest', 'auto', '1080p', '720p'] as const).map((quality) => <button key={quality} className={settings.qualityPreference === quality ? 'selected' : ''} onClick={() => void window.lumen.saveQuality(quality).then(onSettings)}><span>{quality === 'highest' ? '最高画质' : quality === 'auto' ? '智能适配' : quality.toUpperCase()}</span>{settings.qualityPreference === quality && <Check size={16} />}</button>)}</div><div className="source-list playback-options"><div className="source-row"><button className={settings.adFiltering ? 'toggle on' : 'toggle'} onClick={() => void window.lumen.saveAdFiltering(!settings.adFiltering).then(onSettings)}><span /></button><div><strong>HLS 广告片段过滤</strong><small>识别 CUE、SCTE-35、Interstitial 与广告分片路径</small></div><span className="source-state">{settings.adFiltering ? '已开启' : '已关闭'}</span></div></div></section>
+    <section className="settings-section"><div className="settings-heading"><div><h2>播放质量</h2><p>智能适配会根据带宽自动降档，并将其他选项作为最高画质上限。</p></div></div><div className="quality-options">{(['auto', '1080p', '720p', 'highest'] as const).map((quality) => <button key={quality} className={settings.qualityPreference === quality ? 'selected' : ''} onClick={() => void window.lumen.saveQuality(quality).then(onSettings)}><span>{quality === 'highest' ? '不限制' : quality === 'auto' ? '智能适配' : quality.toUpperCase()}</span>{settings.qualityPreference === quality && <Check size={16} />}</button>)}</div><div className="source-list playback-options"><div className="source-row"><button className={settings.adFiltering ? 'toggle on' : 'toggle'} onClick={() => void window.lumen.saveAdFiltering(!settings.adFiltering).then(onSettings)}><span /></button><div><strong>HLS 广告片段过滤</strong><small>识别 CUE、SCTE-35、Interstitial 与广告分片路径</small></div><span className="source-state">{settings.adFiltering ? '已开启' : '已关闭'}</span></div></div></section>
     <section className="settings-section"><div className="settings-heading"><div><h2>弹幕来源</h2><p>播放器会按片名和集数匹配、合并并去重所有启用来源。</p></div></div>
       <div className="add-source"><input value={danmakuName} onChange={(event) => setDanmakuName(event.target.value)} placeholder="来源名称" /><input value={danmakuApi} onChange={(event) => setDanmakuApi(event.target.value)} placeholder="DandanPlay / LogVar 兼容 API 地址" /><button className="primary-button" onClick={addDanmakuProvider}><Plus size={16} />添加</button></div>
       <div className="source-list">{settings.danmakuProviders.map((provider) => <div className={provider.type === 'bilibili' ? 'source-row builtin' : 'source-row'} key={provider.id}><button className={provider.enabled ? 'toggle on' : 'toggle'} onClick={() => void saveDanmakuProviders(settings.danmakuProviders.map((entry) => entry.id === provider.id ? { ...entry, enabled: !entry.enabled } : entry))}><span /></button><div><strong>{provider.name}</strong><small>{provider.type === 'bilibili' ? '内置番剧匹配与弹幕 XML' : provider.api}</small></div>{provider.type !== 'bilibili' && <button className="icon-button danger" aria-label="删除弹幕来源" title="删除弹幕来源" onClick={() => void saveDanmakuProviders(settings.danmakuProviders.filter((entry) => entry.id !== provider.id))}><Trash2 size={16} /></button>}</div>)}</div>

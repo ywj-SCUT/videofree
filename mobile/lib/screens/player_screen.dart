@@ -38,11 +38,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _loading = true;
   String? _error;
   Timer? _saveTimer;
+  Timer? _stallTimer;
   StreamSubscription<Tracks>? _tracksSubscription;
   StreamSubscription<Track>? _trackSubscription;
+  StreamSubscription<bool>? _bufferingSubscription;
   List<VideoTrack> _videoTracks = [VideoTrack.auto()];
   String _selectedTrackId = 'auto';
   bool _preferenceApplied = false;
+  bool _opened = false;
   double _playbackRate = 1.0;
 
   static const _speedOptions = [1.0, 1.5, 2.0];
@@ -59,7 +62,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _episodeIndex = widget.episodeIndex;
     _player = Player(
       configuration: const PlayerConfiguration(
-        bufferSize: 64 * 1024 * 1024,
+        bufferSize: 96 * 1024 * 1024,
       ),
     );
     _videoController = VideoController(_player);
@@ -67,6 +70,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _trackSubscription = _player.stream.track.listen((track) {
       if (mounted) setState(() => _selectedTrackId = track.video.id);
     });
+    _bufferingSubscription = _player.stream.buffering.listen(_handleBuffering);
     _configureMpvCache();
     _openCurrent();
     _saveTimer = Timer.periodic(
@@ -78,9 +82,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _configureMpvCache() async {
     final platform = _player.platform;
     if (platform is NativePlayer) {
-      await platform.setProperty('cache-secs', '30');
-      await platform.setProperty('demuxer-readahead-secs', '10');
-      await platform.setProperty('cache-pause-wait', '1');
+      await platform.setProperty('cache-secs', '60');
+      await platform.setProperty('demuxer-readahead-secs', '30');
+      await platform.setProperty('cache-pause', 'yes');
+      await platform.setProperty('cache-pause-wait', '3');
+      await platform.setProperty('network-timeout', '15');
+    }
+  }
+
+  void _handleBuffering(bool buffering) {
+    if (!buffering) {
+      _stallTimer?.cancel();
+      _stallTimer = null;
+      return;
+    }
+    if (!_opened || _stallTimer != null) return;
+    _stallTimer = Timer(const Duration(seconds: 4), _downgradeAfterStall);
+  }
+
+  Future<void> _downgradeAfterStall() async {
+    _stallTimer = null;
+    if (!_player.state.buffering || _selectedTrackId == 'auto') return;
+    final real = _videoTracks.where((track) => track.id != 'auto').toList()
+      ..sort((left, right) => ((left.w ?? 0) * (left.h ?? 0)).compareTo((right.w ?? 0) * (right.h ?? 0)));
+    final currentIndex = real.indexWhere((track) => track.id == _selectedTrackId);
+    final next = currentIndex > 0 ? real[currentIndex - 1] : VideoTrack.auto();
+    await _player.setVideoTrack(next);
+    if (mounted) {
+      setState(() => _selectedTrackId = next.id);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(next.id == 'auto' ? '网络波动，已恢复自动画质' : '网络波动，已自动降至 ${videoTrackLabel(next)}')),
+      );
     }
   }
 
@@ -91,7 +123,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (mounted) setState(() => _videoTracks = available);
     if (!_preferenceApplied && available.length > 1) {
       _preferenceApplied = true;
-      final preferred = choosePreferredVideoTrack(
+      final preferred = choosePlaybackStartVideoTrack(
         tracks.video,
         widget.appState.qualityPreference,
       );
@@ -101,8 +133,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _selectVideoTrack(VideoTrack track) async {
     HapticFeedback.selectionClick();
-    await _player.setVideoTrack(track);
-    if (mounted) setState(() => _selectedTrackId = track.id);
+    final selected = track.id == 'auto'
+        ? choosePlaybackStartVideoTrack(_videoTracks, 'auto')
+        : track;
+    await _player.setVideoTrack(selected);
+    if (mounted) setState(() => _selectedTrackId = selected.id);
   }
 
   Future<void> _setPlaybackRate(double rate) async {
@@ -112,6 +147,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _openCurrent() async {
+    _opened = false;
+    _stallTimer?.cancel();
+    _stallTimer = null;
     setState(() {
       _loading = true;
       _error = null;
@@ -133,6 +171,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         headers = resolved.headers;
       }
       await _player.open(Media(url, httpHeaders: headers));
+      _opened = true;
       await _player.setRate(_playbackRate);
       final resume = widget.appState.getResume(widget.item);
       if (resume != null &&
@@ -145,6 +184,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       if (mounted) setState(() => _loading = false);
     } catch (error) {
+      _opened = false;
       if (!mounted) return;
       setState(() {
         _error = error.toString();
@@ -186,8 +226,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _stallTimer?.cancel();
     _tracksSubscription?.cancel();
     _trackSubscription?.cancel();
+    _bufferingSubscription?.cancel();
     _saveProgress();
     _player.dispose();
     super.dispose();

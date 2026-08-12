@@ -6,6 +6,7 @@ import type {
 } from '../../src/types';
 
 const SETTINGS_KEY = 'videoget.settings.v1';
+const PLAYBACK_TUNING_KEY = 'videoget.playback-tuning.v2';
 const LIBRARY_KEY = 'videoget.library.v1';
 const defaultSources: CmsSource[] = [
   { id: 'builtin-short-tikhub-tiktok', name: 'TikTok 推荐', type: 'short-api', api: 'https://api.tikhub.io', provider: 'tikhub-tiktok', region: 'US', enabled: false, searchable: true },
@@ -18,7 +19,7 @@ const defaultSettings: AppSettings = {
   sources: defaultSources,
   danmakuProviders: [{ id: 'bilibili', name: 'Bilibili 弹幕', type: 'bilibili', enabled: true }],
   adFiltering: true,
-  qualityPreference: 'highest',
+  qualityPreference: 'auto',
   proxyPort: 0,
   proxyBaseUrl: '/api/proxy',
 };
@@ -35,19 +36,27 @@ function readValue<T>(key: string, fallback: T): T {
 
 function settings(): AppSettings {
   const value = readValue(SETTINGS_KEY, defaultSettings);
+  const needsPlaybackMigration = window.localStorage.getItem(PLAYBACK_TUNING_KEY) !== '1';
   const persisted = new Map((value.sources ?? []).map((source) => [source.id, source]));
   const managed = defaultSources
     .filter((source) => source.id.startsWith('builtin-'))
     .map((source) => ({ ...source, ...persisted.get(source.id) }));
   const custom = (value.sources ?? []).filter((source) => !source.id.startsWith('builtin-'));
-  return {
+  const next: AppSettings = {
     sources: [...managed, ...custom],
     danmakuProviders: value.danmakuProviders ?? structuredClone(defaultSettings.danmakuProviders),
     adFiltering: value.adFiltering ?? true,
-    qualityPreference: value.qualityPreference ?? 'highest',
+    qualityPreference: needsPlaybackMigration && value.qualityPreference === 'highest'
+      ? 'auto'
+      : value.qualityPreference ?? 'auto',
     proxyPort: 0,
     proxyBaseUrl: '/api/proxy',
   };
+  if (needsPlaybackMigration) {
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    window.localStorage.setItem(PLAYBACK_TUNING_KEY, '1');
+  }
+  return next;
 }
 
 function saveSettings(value: AppSettings): AppSettings {

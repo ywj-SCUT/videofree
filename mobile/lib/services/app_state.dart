@@ -12,7 +12,7 @@ class AppState extends ChangeNotifier {
   List<CmsSource> _sources = [];
   List<MediaItem> _favorites = [];
   List<HistoryItem> _history = [];
-  String _qualityPreference = 'highest';
+  String _qualityPreference = 'auto';
 
   List<CmsSource> get sources => _sources;
   List<MediaItem> get favorites => _favorites;

@@ -37,9 +37,31 @@ assert(filtered.manifest.includes('main/1.ts') && filtered.manifest.includes('ma
 assert(!filtered.manifest.includes('ad-0.ts') && !filtered.manifest.includes('mid-1.ts'));
 assert(filtered.manifest.includes('#EXT-X-DISCONTINUITY'));
 
+const cancelledStreams = new Map();
 const upstream = createServer((request, response) => {
   if (request.url === '/playlist.m3u8') {
     response.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' }).end(fixture);
+    return;
+  }
+  if (request.url?.startsWith('/slow.ts')) {
+    const caseId = new URL(request.url, 'http://127.0.0.1').searchParams.get('case');
+    let completed = false;
+    let resolveCancelled;
+    const cancelled = new Promise((resolve) => { resolveCancelled = resolve; });
+    cancelledStreams.set(caseId, cancelled);
+    response.writeHead(200, { 'Content-Type': 'video/mp2t' });
+    response.write(Buffer.alloc(64 * 1024, 3));
+    const interval = setInterval(() => response.write(Buffer.alloc(64 * 1024, 3)), 20);
+    response.once('close', () => {
+      clearInterval(interval);
+      if (!completed) resolveCancelled();
+    });
+    setTimeout(() => {
+      if (response.destroyed) return;
+      completed = true;
+      clearInterval(interval);
+      response.end();
+    }, 10_000);
     return;
   }
   response.writeHead(200, { 'Content-Type': 'video/mp2t' }).end(Buffer.alloc(24_000, 7));
@@ -71,6 +93,19 @@ async function waitFor(origin, child) {
   throw new Error('Web 服务启动超时');
 }
 
+async function abortStream(url, caseId) {
+  const controller = new AbortController();
+  const response = await fetch(url, { signal: controller.signal });
+  const reader = response.body.getReader();
+  const first = await reader.read();
+  assert(first.value?.byteLength > 0, `${caseId} stream must yield data before cancellation`);
+  controller.abort();
+  await Promise.race([
+    cancelledStreams.get(caseId),
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${caseId} upstream stream was not cancelled`)), 3_000)),
+  ]);
+}
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const nextPort = await freePort();
 const origin = `http://127.0.0.1:${nextPort}`;
@@ -86,6 +121,8 @@ try {
   assert(desktopManifest.includes('filterAds=1') && !desktopManifest.includes('mid-1.ts'));
   const desktopSegment = desktopManifest.split(/\r?\n/).find((line) => line.startsWith('http://127.0.0.1:'));
   assert(desktopSegment && (await (await fetch(desktopSegment)).arrayBuffer()).byteLength === 24_000);
+  const desktopSlowTarget = `http://127.0.0.1:${upstreamAddress.port}/slow.ts?case=desktop`;
+  await abortStream(`http://127.0.0.1:${desktop.port}/stream?url=${encodeURIComponent(desktopSlowTarget)}`, 'desktop');
 
   await waitFor(origin, child);
   const webResponse = await fetch(`${origin}/api/proxy?url=${encodeURIComponent(target)}&filterAds=1`);
@@ -94,11 +131,21 @@ try {
   assert(webManifest.includes('filterAds=1') && !webManifest.includes('mid-2.ts'));
   const webSegment = webManifest.split(/\r?\n/).find((line) => line.startsWith('/api/proxy?'));
   assert(webSegment && (await (await fetch(`${origin}${webSegment}`)).arrayBuffer()).byteLength === 24_000);
+  const webSlowTarget = `http://127.0.0.1:${upstreamAddress.port}/slow.ts?case=web`;
+  await abortStream(`${origin}/api/proxy?url=${encodeURIComponent(webSlowTarget)}`, 'web');
 
   const unfilteredResponse = await fetch(`${origin}/api/proxy?url=${encodeURIComponent(target)}`);
   const unfiltered = await unfilteredResponse.text();
   assert(unfiltered.includes('mid-1.ts'));
-  console.log(JSON.stringify({ removedSegments: 3, removedSeconds: 15, desktopBytes: 24_000, webBytes: 24_000, optOutVerified: true }, null, 2));
+  console.log(JSON.stringify({
+    removedSegments: 3,
+    removedSeconds: 15,
+    desktopBytes: 24_000,
+    webBytes: 24_000,
+    desktopCancellation: true,
+    webCancellation: true,
+    optOutVerified: true,
+  }, null, 2));
 } finally {
   child.kill('SIGTERM');
   await desktop.close();

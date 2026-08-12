@@ -49,6 +49,7 @@ void main() {
     expect(choosePreferredVideoTrack(tracks, '1080p').id, 'full-hd');
     expect(choosePreferredVideoTrack(tracks, '720p').id, 'low');
     expect(choosePreferredVideoTrack(tracks, 'auto').id, 'auto');
+    expect(choosePlaybackStartVideoTrack(tracks, 'auto').id, 'full-hd');
     expect(videoTrackLabel(tracks[1]), contains('1080P'));
   });
 

@@ -360,7 +360,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: LinearProgressIndicator(minHeight: 2),
             ),
           const SizedBox(height: 28),
-          const SectionHeading(title: '播放画质', detail: '播放器首次加载时使用的清晰度偏好'),
+          const SectionHeading(title: '播放画质', detail: '自动画质优先保障连续播放，卡顿时会降低清晰度'),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -368,9 +368,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               for (final option in const [
                 ('auto', '自动'),
-                ('highest', '最高'),
                 ('1080p', '1080P'),
                 ('720p', '720P'),
+                ('highest', '不限制'),
               ])
                 ChoiceChip(
                   label: Text(option.$2),

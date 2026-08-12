@@ -5,16 +5,19 @@ import { DEFAULT_SOURCES } from './default-sources.js';
 import type { AppSettings, LibraryState } from './types.js';
 
 interface PersistedData {
+  playbackTuningVersion: number;
   settings: Omit<AppSettings, 'proxyPort'>;
   library: LibraryState;
 }
 
+const playbackTuningVersion = 2;
 const defaults: PersistedData = {
+  playbackTuningVersion,
   settings: {
     sources: DEFAULT_SOURCES,
     danmakuProviders: [{ id: 'bilibili', name: 'Bilibili 弹幕', type: 'bilibili', enabled: true }],
     adFiltering: true,
-    qualityPreference: 'highest',
+    qualityPreference: 'auto',
   },
   library: { favorites: [], history: [] },
 };
@@ -30,6 +33,7 @@ export class Storage {
     try {
       const raw = await readFile(this.file, 'utf8');
       const parsed = JSON.parse(raw) as Partial<PersistedData>;
+      const needsPlaybackMigration = (parsed.playbackTuningVersion ?? 0) < playbackTuningVersion;
       const persistedSources = parsed.settings?.sources ?? [];
       const enabledById = new Map(persistedSources.map((source) => [source.id, source.enabled]));
       const persistedById = new Map(persistedSources.map((source) => [source.id, source]));
@@ -43,14 +47,18 @@ export class Storage {
         ? [...managedSources, ...customSources]
         : structuredClone(DEFAULT_SOURCES);
       this.data = {
+        playbackTuningVersion,
         settings: {
           sources,
           danmakuProviders: parsed.settings?.danmakuProviders ?? structuredClone(defaults.settings.danmakuProviders),
           adFiltering: parsed.settings?.adFiltering ?? defaults.settings.adFiltering,
-          qualityPreference: parsed.settings?.qualityPreference ?? defaults.settings.qualityPreference,
+          qualityPreference: needsPlaybackMigration && parsed.settings?.qualityPreference === 'highest'
+            ? 'auto'
+            : parsed.settings?.qualityPreference ?? defaults.settings.qualityPreference,
         },
         library: { ...defaults.library, ...parsed.library },
       };
+      if (needsPlaybackMigration) await this.flush();
     } catch {
       await this.flush();
     }

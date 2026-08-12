@@ -8,8 +8,8 @@ Android 客户端使用本地引擎直接完成搜索、解析和播放，不需
 
 | 平台 | 技术栈 | 当前版本 | 运行方式 |
 | --- | --- | --- | --- |
-| Windows 桌面端 | Electron、React、TypeScript、ArtPlayer、HLS.js | `0.1.0` | 安装版或便携版 |
-| Android | Flutter、Dart、media_kit | `1.0.0+1` | APK 安装 |
+| Windows 桌面端 | Electron、React、TypeScript、ArtPlayer、HLS.js | `0.0.1` | 安装版或便携版 |
+| Android | Flutter、Dart、media_kit | `0.0.1+1` | APK 安装 |
 | Web 开发预览 | Next.js、React | 与桌面端共享核心能力 | 本地开发服务器 |
 
 ## 主要功能

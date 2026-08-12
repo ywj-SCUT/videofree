@@ -9,6 +9,7 @@ const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
   Accept: '*/*',
 };
+const proxyPreferredUntil = new Map<string, number>();
 
 function proxyUrl(target: string, referer: string, filterAds = false, customHeaders?: Record<string, string>): string {
   const search = new URLSearchParams({ url: target, referer });
@@ -44,19 +45,42 @@ function playbackHeaders(value: string | null): Record<string, string> {
   }
 }
 
-async function fetchUpstream(target: string, headers: Record<string, string>) {
-  const directController = new AbortController();
-  const directTimeout = setTimeout(() => directController.abort(), 5_000);
+async function fetchWithHeaderTimeout(target: string, headers: Record<string, string>, signal: AbortSignal, timeoutMs: number, dispatcher?: ProxyAgent) {
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
   try {
-    const direct = await undiciFetch(target, { headers, redirect: 'follow', signal: directController.signal });
+    const response = await undiciFetch(target, { headers, redirect: 'follow', dispatcher, signal: AbortSignal.any([signal, timeoutController.signal]) });
+    clearTimeout(timeout);
+    return response;
+  } catch (error) {
+    clearTimeout(timeout);
+    throw error;
+  }
+}
+
+async function fetchUpstream(target: string, headers: Record<string, string>, signal: AbortSignal) {
+  const origin = new URL(target).origin;
+  if ((proxyPreferredUntil.get(origin) ?? 0) > Date.now()) {
+    try {
+      const proxied = await fetchWithHeaderTimeout(target, headers, signal, 20_000, outboundProxy);
+      if (proxied.ok || proxied.status === 206) return proxied;
+      await proxied.body?.cancel();
+    } catch (error) {
+      if (signal.aborted) throw error;
+    }
+    proxyPreferredUntil.delete(origin);
+  }
+  try {
+    const direct = await fetchWithHeaderTimeout(target, headers, signal, 5_000);
     if (direct.ok || direct.status === 206) return direct;
     await direct.body?.cancel();
-  } catch {
+  } catch (error) {
+    if (signal.aborted) throw error;
     // Retry through the configured local proxy.
-  } finally {
-    clearTimeout(directTimeout);
   }
-  return undiciFetch(target, { headers, redirect: 'follow', dispatcher: outboundProxy, signal: AbortSignal.timeout(20_000) });
+  const proxied = await fetchWithHeaderTimeout(target, headers, signal, 20_000, outboundProxy);
+  if (proxied.ok || proxied.status === 206) proxyPreferredUntil.set(origin, Date.now() + 5 * 60_000);
+  return proxied;
 }
 
 export async function GET(request: Request) {
@@ -70,7 +94,7 @@ export async function GET(request: Request) {
     const headers: Record<string, string> = { ...defaultHeaders, ...customHeaders, Referer: customHeaders.Referer ?? customHeaders.referer ?? referer };
     const range = request.headers.get('range');
     if (range) headers.Range = range;
-    const upstream = await fetchUpstream(target, headers);
+    const upstream = await fetchUpstream(target, headers, request.signal);
     if (!upstream.ok && upstream.status !== 206) return new Response(`Upstream HTTP ${upstream.status}`, { status: upstream.status });
     const contentType = upstream.headers.get('content-type') ?? '';
     const manifest = /mpegurl|m3u8/i.test(contentType) || new URL(target).pathname.toLowerCase().endsWith('.m3u8');

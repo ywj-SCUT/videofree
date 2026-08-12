@@ -8,6 +8,7 @@ class StorageService {
   static const _favoritesKey = 'videoget.favorites';
   static const _historyKey = 'videoget.history';
   static const _qualityKey = 'videoget.quality';
+  static const _playbackTuningKey = 'videoget.playback-tuning.v2';
 
   static const _defaultSources = [
     {
@@ -158,7 +159,15 @@ class StorageService {
 
   Future<String> getQualityPreference() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_qualityKey) ?? 'highest';
+    final current = prefs.getString(_qualityKey);
+    if (prefs.getBool(_playbackTuningKey) != true) {
+      await prefs.setBool(_playbackTuningKey, true);
+      if (current == 'highest') {
+        await prefs.setString(_qualityKey, 'auto');
+        return 'auto';
+      }
+    }
+    return current ?? 'auto';
   }
 
   Future<void> saveQualityPreference(String quality) async {

@@ -99,25 +99,61 @@ function createLimiter(limit: number): <T>(task: () => Promise<T>) => Promise<T>
   };
 }
 
-async function fetchHeaders(target: string, headers: Record<string, string>, dispatcher?: ProxyAgent, timeoutMs = 5_000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+function waitForDrain(response: http.ServerResponse): Promise<boolean> {
+  return new Promise((resolve) => {
+    const onDrain = () => { cleanup(); resolve(true); };
+    const onClose = () => { cleanup(); resolve(false); };
+    const cleanup = () => {
+      response.off('drain', onDrain);
+      response.off('close', onClose);
+    };
+    response.once('drain', onDrain);
+    response.once('close', onClose);
+  });
+}
+
+async function fetchHeaders(target: string, headers: Record<string, string>, dispatcher?: ProxyAgent, timeoutMs = 5_000, signal?: AbortSignal) {
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
   try {
-    return await undiciFetch(target, { headers, redirect: 'follow', dispatcher, signal: controller.signal });
-  } finally {
+    const fetchSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
+    const result = await undiciFetch(target, { headers, redirect: 'follow', dispatcher, signal: fetchSignal });
     clearTimeout(timeout);
+    return result;
+  } catch (error) {
+    clearTimeout(timeout);
+    throw error;
   }
 }
 
-async function fetchStream(target: string, headers: Record<string, string>, dispatcher: ProxyAgent) {
+interface RoutePreference { route: 'proxy'; expiresAt: number }
+
+async function fetchStream(target: string, headers: Record<string, string>, dispatcher: ProxyAgent, routePreferences: Map<string, RoutePreference>, signal: AbortSignal) {
+  const origin = new URL(target).origin;
+  const preference = routePreferences.get(origin);
+  if (preference && preference.expiresAt > Date.now()) {
+    try {
+      const proxied = await fetchHeaders(target, headers, dispatcher, 15_000, signal);
+      if (proxied.ok || proxied.status === 206) return proxied;
+      await proxied.body?.cancel();
+    } catch (error) {
+      if (signal.aborted) throw error;
+    }
+    routePreferences.delete(origin);
+  }
   try {
-    const direct = await fetchHeaders(target, headers);
+    const direct = await fetchHeaders(target, headers, undefined, 4_500, signal);
     if (direct.ok || direct.status === 206) return direct;
     await direct.body?.cancel();
-  } catch {
+  } catch (error) {
+    if (signal.aborted) throw error;
     // Fall through to the configured local proxy.
   }
-  return fetchHeaders(target, headers, dispatcher, 15_000);
+  const proxied = await fetchHeaders(target, headers, dispatcher, 15_000, signal);
+  if (proxied.ok || proxied.status === 206) {
+    routePreferences.set(origin, { route: 'proxy', expiresAt: Date.now() + 5 * 60_000 });
+  }
+  return proxied;
 }
 
 export async function startProxyServer(cacheDirectory: string): Promise<{ port: number; close: () => Promise<void> }> {
@@ -126,6 +162,7 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
   const proxyUrl = process.env.VIDEOGET_PROXY ?? process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY ?? 'http://127.0.0.1:7890';
   const imageOutboundProxy = new ProxyAgent(proxyUrl);
   const streamOutboundProxy = new ProxyAgent(proxyUrl);
+  const streamRoutePreferences = new Map<string, RoutePreference>();
   const limitImages = createLimiter(4);
   const pendingImages = new Map<string, Promise<Buffer>>();
   const server = http.createServer(async (request, response) => {
@@ -191,13 +228,18 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
       return;
     }
     try {
+      const controller = new AbortController();
+      request.once('aborted', () => controller.abort());
+      response.once('close', () => {
+        if (!response.writableEnded) controller.abort();
+      });
       const customHeaders = playbackHeaders(incoming.searchParams.get('headers'));
       const headers: Record<string, string> = { ...defaultHeaders, ...customHeaders };
       const referer = incoming.searchParams.get('referer');
       const filterAds = incoming.searchParams.get('filterAds') === '1';
       if (referer) headers.Referer = referer;
       if (request.headers.range) headers.Range = request.headers.range;
-      const upstream = await fetchStream(target, headers, streamOutboundProxy);
+      const upstream = await fetchStream(target, headers, streamOutboundProxy, streamRoutePreferences, controller.signal);
       if (!upstream.ok && upstream.status !== 206) {
         response.writeHead(upstream.status).end(`Upstream HTTP ${upstream.status}`);
         return;
@@ -231,10 +273,16 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        if (!response.write(Buffer.from(value))) await new Promise((resolve) => response.once('drain', resolve));
+        if (!response.write(Buffer.from(value))) {
+          if (!await waitForDrain(response)) {
+            await reader.cancel();
+            return;
+          }
+        }
       }
       response.end();
     } catch (error) {
+      if (request.aborted || response.destroyed) return;
       if (!response.headersSent) response.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
       response.end(error instanceof Error ? error.message : 'Proxy error');
     }
