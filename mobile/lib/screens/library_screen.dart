@@ -168,16 +168,22 @@ class _LibraryScreenState extends State<LibraryScreen>
                 : () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) =>
-                          DetailScreen(appState: widget.appState, item: item),
+                      builder: (_) => DetailScreen(
+                        appState: widget.appState,
+                        item: item,
+                        resume: h,
+                      ),
                     ),
                   ),
           ),
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) =>
-                  DetailScreen(appState: widget.appState, item: item),
+              builder: (_) => DetailScreen(
+                appState: widget.appState,
+                item: item,
+                resume: history == null ? null : h,
+              ),
             ),
           ),
         );
@@ -229,11 +235,15 @@ class _LibraryScreenState extends State<LibraryScreen>
               child: FloatingActionButton.extended(
                 onPressed: () {
                   final item = widget.appState.history.first.item;
+                  final resume = widget.appState.history.first;
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) =>
-                          DetailScreen(appState: widget.appState, item: item),
+                      builder: (_) => DetailScreen(
+                        appState: widget.appState,
+                        item: item,
+                        resume: resume,
+                      ),
                     ),
                   );
                 },

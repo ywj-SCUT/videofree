@@ -3,6 +3,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:videoget_mobile/models/models.dart';
 import 'package:videoget_mobile/services/media_url.dart';
 import 'package:videoget_mobile/services/quality_selector.dart';
+import 'package:videoget_mobile/screens/player_screen.dart';
 
 void main() {
   test('media item JSON round trip preserves playback data', () {
@@ -49,7 +50,7 @@ void main() {
     expect(choosePreferredVideoTrack(tracks, '1080p').id, 'full-hd');
     expect(choosePreferredVideoTrack(tracks, '720p').id, 'low');
     expect(choosePreferredVideoTrack(tracks, 'auto').id, 'auto');
-    expect(choosePlaybackStartVideoTrack(tracks, 'auto').id, 'full-hd');
+    expect(choosePlaybackStartVideoTrack(tracks, 'auto').id, 'auto');
     expect(videoTrackLabel(tracks[1]), contains('1080P'));
   });
 
@@ -58,6 +59,43 @@ void main() {
     expect(
       resolveMediaUrl('https://images.example/sintel.jpg'),
       'https://images.example/sintel.jpg',
+    );
+  });
+
+  test('resume policy keeps an unfinished episode without duration', () {
+    final item = MediaItem(
+      id: 'resume',
+      sourceId: 'source',
+      sourceName: 'Source',
+      title: 'Resume',
+      poster: '',
+      category: MediaCategory.movie,
+    );
+    expect(
+      shouldResumePlayback(
+        HistoryItem(
+          item: item,
+          progress: 420,
+          duration: 0,
+          episodeName: 'Episode 1',
+          watchedAt: 1,
+        ),
+        'Episode 1',
+      ),
+      isTrue,
+    );
+    expect(
+      shouldResumePlayback(
+        HistoryItem(
+          item: item,
+          progress: 100,
+          duration: 100,
+          episodeName: 'Episode 1',
+          watchedAt: 1,
+        ),
+        'Episode 1',
+      ),
+      isFalse,
     );
   });
 }

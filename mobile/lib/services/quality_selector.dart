@@ -47,27 +47,10 @@ VideoTrack choosePlaybackStartVideoTrack(
   List<VideoTrack> tracks,
   String preference,
 ) {
-  if (preference != 'auto') {
-    return choosePreferredVideoTrack(tracks, preference);
-  }
-  final real = selectableVideoTracks(tracks)
-      .where((track) => track.id != 'auto')
-      .toList();
-  if (real.isEmpty) return VideoTrack.auto();
-  real.sort((left, right) {
-    final resolution = ((right.w ?? 0) * (right.h ?? 0)).compareTo(
-      (left.w ?? 0) * (left.h ?? 0),
-    );
-    return resolution != 0
-        ? resolution
-        : (right.bitrate ?? 0).compareTo(left.bitrate ?? 0);
-  });
-  return real.firstWhere(
-    (track) =>
-        (track.h == null || track.h! <= 1080) &&
-        (track.bitrate == null || track.bitrate! <= 6000000),
-    orElse: () => real.last,
-  );
+  // Keep automatic playback automatic so HLS can adapt down when bandwidth
+  // drops during a long video. Fixed preferences are applied explicitly.
+  if (preference == 'auto') return VideoTrack.auto();
+  return choosePreferredVideoTrack(tracks, preference);
 }
 
 String videoTrackLabel(VideoTrack track) {

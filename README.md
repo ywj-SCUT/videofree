@@ -8,8 +8,8 @@ Android 客户端使用本地引擎直接完成搜索、解析和播放，不需
 
 | 平台 | 技术栈 | 当前版本 | 运行方式 |
 | --- | --- | --- | --- |
-| Windows 桌面端 | Electron、React、TypeScript、ArtPlayer、HLS.js | `0.0.1` | 安装版或便携版 |
-| Android | Flutter、Dart、media_kit | `0.0.1+1` | APK 安装 |
+| Windows 桌面端 | Electron、React、TypeScript、ArtPlayer、HLS.js | `0.0.2` | 安装版或便携版 |
+| Android | Flutter、Dart、media_kit | `0.0.2+2` | APK 安装 |
 | Web 开发预览 | Next.js、React | 与桌面端共享核心能力 | 本地开发服务器 |
 
 ## 主要功能
@@ -29,6 +29,9 @@ Android 客户端使用本地引擎直接完成搜索、解析和播放，不需
 - 支持自动、最高、1080P 和 720P 清晰度偏好；最终画质取决于内容源。
 - 桌面端提供本地 HLS 代理、播放列表重写、广告分片过滤和弹幕来源配置。
 - Android 端支持播放请求头、HLS 清晰度识别和本地 Spider 规则解析。
+- Android 长视频播放器默认保持 HLS 自适应码率，并使用播放前配置的 mpv 缓冲与预读参数。
+- 观看记录会在切换剧集、切换线路和退出播放器前保存，历史入口直接恢复到上次剧集和播放时间。
+- 倍速、清晰度、线路和选集集中在全屏控制栏的设置面板；全屏顶栏显示剧名、当前集、系统时间和电量。
 
 ### 短视频
 

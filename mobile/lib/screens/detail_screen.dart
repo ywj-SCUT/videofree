@@ -11,7 +11,13 @@ import 'player_screen.dart';
 class DetailScreen extends StatefulWidget {
   final AppState appState;
   final MediaItem item;
-  const DetailScreen({super.key, required this.appState, required this.item});
+  final HistoryItem? resume;
+  const DetailScreen({
+    super.key,
+    required this.appState,
+    required this.item,
+    this.resume,
+  });
 
   @override
   State<DetailScreen> createState() => _DetailScreenState();
@@ -42,7 +48,7 @@ class _DetailScreenState extends State<DetailScreen> {
       );
       if (!mounted) return;
       if (result != null && result.playLines?.isNotEmpty == true) {
-        final resume = widget.appState.getResume(widget.item);
+        final resume = widget.resume ?? widget.appState.getResume(widget.item);
         if (resume != null) {
           final matchLine = result.playLines!.indexWhere(
             (line) => line.name == resume.lineName,

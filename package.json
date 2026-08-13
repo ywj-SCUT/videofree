@@ -1,6 +1,6 @@
 {
   "name": "videoget-desktop",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "VideoGET local-first desktop video aggregator and player",
   "main": "dist-electron/main.js",
