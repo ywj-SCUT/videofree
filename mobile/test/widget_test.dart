@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:videoget_mobile/models/models.dart';
@@ -97,5 +98,71 @@ void main() {
       ),
       isFalse,
     );
+    final resume = HistoryItem(
+      item: item,
+      progress: 420,
+      duration: 1200,
+      episodeName: 'Episode 1',
+      watchedAt: 1,
+    );
+    expect(
+      shouldApplyResumeSeek(resume, 'Episode 1', Duration.zero, Duration.zero),
+      isFalse,
+    );
+    expect(
+      shouldApplyResumeSeek(
+        resume,
+        'Episode 1',
+        const Duration(minutes: 20),
+        Duration.zero,
+      ),
+      isTrue,
+    );
+    expect(
+      shouldApplyResumeSeek(
+        resume,
+        'Episode 1',
+        Duration.zero,
+        const Duration(milliseconds: 200),
+      ),
+      isTrue,
+    );
   });
+
+  test(
+    'nearby pointer downs toggle playback only within double-tap window',
+    () {
+      const first = Duration(seconds: 1);
+      expect(
+        isPlaybackToggleDoubleTap(
+          first,
+          const Offset(100, 100),
+          first + const Duration(milliseconds: 250),
+          const Offset(118, 106),
+        ),
+        isTrue,
+      );
+      expect(
+        isPlaybackToggleDoubleTap(
+          first,
+          const Offset(100, 100),
+          first + const Duration(milliseconds: 500),
+          const Offset(118, 106),
+        ),
+        isFalse,
+      );
+      expect(
+        isPlaybackToggleRegion(const Offset(300, 220), const Size(600, 400)),
+        isTrue,
+      );
+      expect(
+        isPlaybackToggleRegion(const Offset(160, 90), const Size(320, 180)),
+        isTrue,
+      );
+      expect(
+        isPlaybackToggleRegion(const Offset(300, 360), const Size(600, 400)),
+        isFalse,
+      );
+    },
+  );
 }

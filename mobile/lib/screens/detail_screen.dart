@@ -48,7 +48,7 @@ class _DetailScreenState extends State<DetailScreen> {
       );
       if (!mounted) return;
       if (result != null && result.playLines?.isNotEmpty == true) {
-        final resume = widget.resume ?? widget.appState.getResume(widget.item);
+        final resume = widget.appState.getResume(widget.item) ?? widget.resume;
         if (resume != null) {
           final matchLine = result.playLines!.indexWhere(
             (line) => line.name == resume.lineName,
@@ -87,6 +87,7 @@ class _DetailScreenState extends State<DetailScreen> {
           playLines: lines,
           lineIndex: _lineIndex,
           episodeIndex: _episodeIndex,
+          resume: widget.appState.getResume(widget.item) ?? widget.resume,
         ),
       ),
     );

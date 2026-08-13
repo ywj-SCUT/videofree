@@ -19,12 +19,41 @@ bool shouldResumePlayback(HistoryItem? resume, String episodeName) {
   return resume.duration <= 0 || resume.progress < resume.duration - 15;
 }
 
+bool shouldApplyResumeSeek(
+  HistoryItem? resume,
+  String episodeName,
+  Duration duration,
+  Duration position,
+) {
+  return shouldResumePlayback(resume, episodeName) &&
+      (duration > Duration.zero || position > Duration.zero);
+}
+
+bool isPlaybackToggleDoubleTap(
+  Duration? previousTime,
+  Offset? previousPosition,
+  Duration currentTime,
+  Offset currentPosition,
+) {
+  if (previousTime == null || previousPosition == null) return false;
+  return currentTime - previousTime <=
+          const Duration(milliseconds: 350) &&
+      (currentPosition - previousPosition).distance <= 72;
+}
+
+bool isPlaybackToggleRegion(Offset position, Size size) {
+  final topInset = math.min(72.0, size.height * .22);
+  final bottomInset = math.min(96.0, size.height * .24);
+  return position.dy >= topInset && position.dy <= size.height - bottomInset;
+}
+
 class PlayerScreen extends StatefulWidget {
   final AppState appState;
   final MediaItem item;
   final List<PlayLine> playLines;
   final int lineIndex;
   final int episodeIndex;
+  final HistoryItem? resume;
 
   const PlayerScreen({
     super.key,
@@ -33,6 +62,7 @@ class PlayerScreen extends StatefulWidget {
     required this.playLines,
     required this.lineIndex,
     required this.episodeIndex,
+    this.resume,
   });
 
   @override
@@ -50,12 +80,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _stallTimer;
   StreamSubscription<Tracks>? _tracksSubscription;
   StreamSubscription<Track>? _trackSubscription;
+  StreamSubscription<Duration>? _durationSubscription;
+  StreamSubscription<Duration>? _positionSubscription;
   StreamSubscription<bool>? _bufferingSubscription;
   List<VideoTrack> _videoTracks = [VideoTrack.auto()];
   String _selectedTrackId = 'auto';
   bool _preferenceApplied = false;
   bool _opened = false;
   double _playbackRate = 1.0;
+  HistoryItem? _resume;
+  bool _resumeApplied = false;
+  bool _resumeSeekInFlight = false;
+  Future<void> _saveQueue = Future.value();
+  Duration? _lastPointerDown;
+  Offset? _lastPointerPosition;
+  bool _allowPop = false;
 
   static const _speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
 
@@ -69,6 +108,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     _lineIndex = widget.lineIndex;
     _episodeIndex = widget.episodeIndex;
+    _resume = widget.resume;
     _player = Player(
       configuration: const PlayerConfiguration(bufferSize: 128 * 1024 * 1024),
     );
@@ -76,6 +116,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _tracksSubscription = _player.stream.tracks.listen(_handleTracks);
     _trackSubscription = _player.stream.track.listen((track) {
       if (mounted) setState(() => _selectedTrackId = track.video.id);
+    });
+    _durationSubscription = _player.stream.duration.listen((_) {
+      _applyResumeIfReady();
+    });
+    _positionSubscription = _player.stream.position.listen((_) {
+      _applyResumeIfReady();
     });
     _bufferingSubscription = _player.stream.buffering.listen(_handleBuffering);
     _openCurrent();
@@ -166,8 +212,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (mounted) setState(() => _playbackRate = rate);
   }
 
+  Future<void> _applyResumeIfReady() async {
+    if (!_opened || _resumeApplied || _resumeSeekInFlight) return;
+    final resume = _resume;
+    if (!shouldApplyResumeSeek(
+      resume,
+      _current.name,
+      _player.state.duration,
+      _player.state.position,
+    )) {
+      return;
+    }
+    final target = Duration(milliseconds: (resume!.progress * 1000).round());
+    if (_player.state.position >= target - const Duration(seconds: 2)) {
+      _resumeApplied = true;
+      return;
+    }
+    _resumeSeekInFlight = true;
+    try {
+      await _player.seek(target);
+    } finally {
+      _resumeSeekInFlight = false;
+    }
+  }
+
   Future<void> _openCurrent() async {
     _opened = false;
+    _resumeApplied = false;
+    _resumeSeekInFlight = false;
     _stallTimer?.cancel();
     _stallTimer = null;
     setState(() {
@@ -194,15 +266,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // first HLS demuxer inherits defaults and the cache never reaches the
       // long-video tuning above.
       await _configureMpvCache();
-      await _player.open(Media(url, httpHeaders: headers));
+      final resume = _resume;
+      final resumeStart = shouldResumePlayback(resume, _current.name)
+          ? Duration(milliseconds: (resume!.progress * 1000).round())
+          : null;
+      // Media.start is applied by mpv while loading. The stream-driven seek
+      // below verifies the resulting position and compensates if a source
+      // resets its timeline after open() returns.
+      await _player.open(Media(url, httpHeaders: headers, start: resumeStart));
       _opened = true;
       await _player.setRate(_playbackRate);
-      final resume = widget.appState.getResume(widget.item);
-      if (resume != null && shouldResumePlayback(resume, _current.name)) {
-        await _player.seek(
-          Duration(milliseconds: (resume.progress * 1000).round()),
-        );
-      }
+      await _applyResumeIfReady();
       if (mounted) setState(() => _loading = false);
     } catch (error) {
       _opened = false;
@@ -218,18 +292,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final position = _player.state.position.inMilliseconds / 1000.0;
     final duration = _player.state.duration.inMilliseconds / 1000.0;
     if (position <= 0) return;
-    await widget.appState.updateProgress(
-      widget.item,
-      position,
-      duration,
-      widget.playLines[_lineIndex].name,
-      _current.name,
+    final item = widget.item;
+    final lineName = widget.playLines[_lineIndex].name;
+    final episodeName = _current.name;
+    _saveQueue = _saveQueue.then(
+      (_) => widget.appState.updateProgress(
+        item,
+        position,
+        duration,
+        lineName,
+        episodeName,
+      ),
     );
+    await _saveQueue;
   }
 
   Future<void> _selectLine(int index) async {
     if (index == _lineIndex) return;
     await _saveProgress();
+    _resume = null;
     HapticFeedback.selectionClick();
     setState(() {
       _lineIndex = index;
@@ -241,6 +322,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _selectEpisode(int index) async {
     if (index == _episodeIndex) return;
     await _saveProgress();
+    _resume = null;
     HapticFeedback.selectionClick();
     setState(() => _episodeIndex = index);
     _openCurrent();
@@ -252,6 +334,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _stallTimer?.cancel();
     _tracksSubscription?.cancel();
     _trackSubscription?.cancel();
+    _durationSubscription?.cancel();
+    _positionSubscription?.cancel();
     _bufferingSubscription?.cancel();
     // Capture the current position before disposing mpv. Calling dispose
     // first resets the state and used to overwrite history with 0 seconds.
@@ -263,14 +347,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return PopScope<Object?>(
+      canPop: _allowPop,
+      onPopInvokedWithResult: _handlePop,
+      child: Scaffold(
         backgroundColor: Colors.black,
-        title: const SizedBox.shrink(),
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          title: const SizedBox.shrink(),
+        ),
+        body: SafeArea(top: false, child: Center(child: _buildVideo(colors))),
       ),
-      body: SafeArea(top: false, child: Center(child: _buildVideo(colors))),
     );
+  }
+
+  Future<void> _handlePop(bool didPop, Object? result) async {
+    if (didPop || _allowPop) return;
+    await _saveProgress();
+    if (!mounted) return;
+    setState(() => _allowPop = true);
+    Navigator.of(context).pop(result);
   }
 
   Widget _buildVideo(ColorScheme colors) {
@@ -281,10 +377,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
         children: [
           MaterialVideoControlsTheme(
             normal: const MaterialVideoControlsThemeData(
+              visibleOnMount: true,
               topButtonBar: [],
-              bottomButtonBar: [MaterialFullscreenButton()],
+              bottomButtonBar: [
+                MaterialFullscreenButton(
+                  key: ValueKey('player-fullscreen-toggle'),
+                ),
+              ],
             ),
             fullscreen: MaterialVideoControlsThemeData(
+              visibleOnMount: true,
+              displaySeekBar: true,
+              seekOnDoubleTap: false,
+              seekBarMargin: const EdgeInsets.only(
+                left: 16,
+                right: 16,
+                bottom: 42,
+              ),
+              bottomButtonBarMargin: const EdgeInsets.only(
+                left: 16,
+                right: 8,
+                bottom: 42,
+              ),
               topButtonBar: [
                 _FullscreenHeader(
                   title: widget.item.title,
@@ -298,12 +412,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   icon: const Icon(Icons.tune_rounded),
                   onPressed: _showFullscreenSettings,
                 ),
-                const MaterialFullscreenButton(),
+                const MaterialFullscreenButton(
+                  key: ValueKey('player-fullscreen-toggle'),
+                ),
               ],
             ),
             child: Video(
               controller: _videoController,
-              controls: MaterialVideoControls,
+              controls: _buildVideoControls,
             ),
           ),
           AnimatedSwitcher(
@@ -356,6 +472,49 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _togglePlayback() async {
+    HapticFeedback.selectionClick();
+    await _player.playOrPause();
+  }
+
+  Widget _buildVideoControls(VideoState state) {
+    return LayoutBuilder(
+      builder: (context, constraints) => Listener(
+        key: const ValueKey('player-double-tap-surface'),
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (event) => _handlePointerDown(
+          event,
+          Size(constraints.maxWidth, constraints.maxHeight),
+        ),
+        child: MaterialVideoControls(state),
+      ),
+    );
+  }
+
+  void _handlePointerDown(PointerDownEvent event, Size size) {
+    if (!isPlaybackToggleRegion(event.localPosition, size)) {
+      _lastPointerDown = null;
+      _lastPointerPosition = null;
+      return;
+    }
+    final now = event.timeStamp;
+    final lastTime = _lastPointerDown;
+    final lastPosition = _lastPointerPosition;
+    _lastPointerDown = now;
+    _lastPointerPosition = event.localPosition;
+    if (!isPlaybackToggleDoubleTap(
+      lastTime,
+      lastPosition,
+      now,
+      event.localPosition,
+    )) {
+      return;
+    }
+    _lastPointerDown = null;
+    _lastPointerPosition = null;
+    _togglePlayback();
   }
 
   Future<void> _showFullscreenSettings() async {
@@ -543,6 +702,7 @@ class _FullscreenHeaderState extends State<_FullscreenHeader> {
         ? Icons.battery_5_bar_rounded
         : Icons.battery_2_bar_rounded;
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           time,
@@ -555,7 +715,8 @@ class _FullscreenHeaderState extends State<_FullscreenHeader> {
           Text('$level%', style: const TextStyle(fontSize: 12)),
           const SizedBox(width: 14),
         ],
-        Expanded(
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 220),
           child: Text(
             '${widget.title} · ${widget.episode}',
             maxLines: 1,
