@@ -6,6 +6,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { fetch as undiciFetch, ProxyAgent } from 'undici';
 import { filterHlsManifest } from './hls-filter.js';
+import { VideoCache, isCacheableSegment } from './video-cache.js';
 
 const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
@@ -156,7 +157,16 @@ async function fetchStream(target: string, headers: Record<string, string>, disp
   return proxied;
 }
 
-export async function startProxyServer(cacheDirectory: string): Promise<{ port: number; close: () => Promise<void> }> {
+function parseRange(range: string, total: number): { start: number; end: number } | null {
+  const match = /bytes=(\d+)-(\d*)/.exec(range);
+  if (!match) return null;
+  const start = parseInt(match[1], 10);
+  const end = match[2] ? parseInt(match[2], 10) : total - 1;
+  if (start > end || start >= total) return null;
+  return { start, end: Math.min(end, total - 1) };
+}
+
+export async function startProxyServer(cacheDirectory: string, videoCache?: VideoCache): Promise<{ port: number; close: () => Promise<void> }> {
   let port = 0;
   await mkdir(cacheDirectory, { recursive: true });
   const proxyUrl = process.env.VIDEOGET_PROXY ?? process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY ?? 'http://127.0.0.1:7890';
@@ -175,6 +185,14 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
     const incoming = new URL(request.url ?? '/', 'http://127.0.0.1');
     if (incoming.pathname === '/health') {
       response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (incoming.pathname === '/cache-stats' && videoCache) {
+      response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+        size: videoCache.size,
+        count: videoCache.count,
+        sizeMB: Math.round(videoCache.size / 1024 / 1024 * 100) / 100,
+      }));
       return;
     }
     if (incoming.pathname === '/image') {
@@ -218,6 +236,50 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
       }
       return;
     }
+    if (incoming.pathname === '/prefetch' && videoCache) {
+      const target = incoming.searchParams.get('url');
+      if (!target || !/^https?:\/\//i.test(target)) {
+        response.writeHead(400).end('Invalid target');
+        return;
+      }
+      try {
+        if (videoCache.has(target)) {
+          response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ cached: true, size: 0 }));
+          return;
+        }
+        const customHeaders = playbackHeaders(incoming.searchParams.get('headers'));
+        const headers: Record<string, string> = { ...defaultHeaders, ...customHeaders };
+        const referer = incoming.searchParams.get('referer');
+        if (referer) headers.Referer = referer;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30_000);
+        try {
+          const upstream = await fetchStream(target, headers, streamOutboundProxy, streamRoutePreferences, controller.signal);
+          clearTimeout(timeout);
+          if (!upstream.ok && upstream.status !== 206) {
+            response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ cached: false, size: 0 }));
+            return;
+          }
+          const contentType = upstream.headers.get('content-type') ?? '';
+          if (isCacheableSegment(target, contentType)) {
+            const buffer = Buffer.from(await upstream.arrayBuffer());
+            if (buffer.length > 0 && buffer.length <= 100 * 1024 * 1024) {
+              await videoCache.put(target, buffer);
+              response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ cached: false, size: buffer.length }));
+              return;
+            }
+          }
+          response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ cached: false, size: 0 }));
+        } catch {
+          clearTimeout(timeout);
+          response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ cached: false, size: 0 }));
+        }
+      } catch (error) {
+        response.writeHead(502, { 'Content-Type': 'application/json' }).end(JSON.stringify({ cached: false, size: 0, error: String(error) }));
+      }
+      return;
+    }
+
     if (incoming.pathname !== '/stream') {
       response.writeHead(404).end('Not found');
       return;
@@ -238,6 +300,26 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
       const referer = incoming.searchParams.get('referer');
       const filterAds = incoming.searchParams.get('filterAds') === '1';
       if (referer) headers.Referer = referer;
+
+      // --- Cache fast-path for video segments ---
+      // When the request has no Range header and the URL is a cacheable
+      // segment, we can serve from the disk cache without hitting upstream.
+      if (videoCache && !request.headers.range) {
+        const cached = await videoCache.get(target);
+        if (cached) {
+          response.writeHead(200, {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': cached.length,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'public, max-age=86400, immutable',
+            'X-VideoGET-Cache': 'HIT',
+          });
+          response.end(cached);
+          return;
+        }
+      }
+
+      // Forward Range header for upstream requests
       if (request.headers.range) headers.Range = request.headers.range;
       const upstream = await fetchStream(target, headers, streamOutboundProxy, streamRoutePreferences, controller.signal);
       if (!upstream.ok && upstream.status !== 206) {
@@ -259,21 +341,29 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
         response.end(rewriteManifest(filtered.manifest, upstream.url || target, port, referer ?? target, filterAds, customHeaders));
         return;
       }
+
+      // --- Cache write-path for cacheable segments ---
+      const cacheable = videoCache && !request.headers.range && (upstream.status === 200 || upstream.status === 206) && isCacheableSegment(target, contentType);
+
       const forwarded = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control'];
       for (const name of forwarded) {
         const value = upstream.headers.get(name);
         if (value) response.setHeader(name, value);
       }
+      if (cacheable) response.setHeader('X-VideoGET-Cache', 'MISS');
       response.statusCode = upstream.status;
       if (!upstream.body) {
         response.end();
         return;
       }
+      const chunks: Buffer[] = [];
       const reader = upstream.body.getReader();
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        if (!response.write(Buffer.from(value))) {
+        const chunk = Buffer.from(value);
+        if (cacheable) chunks.push(chunk);
+        if (!response.write(chunk)) {
           if (!await waitForDrain(response)) {
             await reader.cancel();
             return;
@@ -281,6 +371,11 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
         }
       }
       response.end();
+      // Persist to disk cache asynchronously after the client has received
+      // all data, so streaming latency is unaffected.
+      if (cacheable && chunks.length > 0) {
+        void videoCache!.put(target, Buffer.concat(chunks));
+      }
     } catch (error) {
       if (request.aborted || response.destroyed) return;
       if (!response.headersSent) response.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -293,7 +388,7 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
     server.listen(0, '127.0.0.1', () => resolve());
   });
   const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('无法启动本地代理');
+  if (!address || typeof address === 'string') throw new Error('Unable to start local proxy');
   port = address.port;
   return {
     port,
@@ -303,3 +398,4 @@ export async function startProxyServer(cacheDirectory: string): Promise<{ port: 
     },
   };
 }
+

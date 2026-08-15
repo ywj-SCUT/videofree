@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.0.3] - 2026-08-15
+
+### v0.0.3 - Full Video Prefetch & Disk Cache
+
+- **HLS segment disk cache (2GB LRU):** Desktop proxy server caches .ts/.m4s/.aac segments to disk with SHA-256 keying and atomic writes
+- **Background prefetch of entire video:** New PrefetchManager pre-downloads all video segments (4 concurrent workers) when playback starts, ensuring 100% cache hit rate
+- **Efficient /prefetch endpoint:** Dedicated proxy endpoint that fetches and caches segments without transferring video data back to the caller
+- **HLS.js buffer tuning:** maxBufferLength 60s / maxMaxBufferLength 120s / 128MB buffer / 8 retries / 45s timeout
+- **Android mpv full-video prefetch:** cache-secs=86400 (24h, effectively unlimited), demuxer-readahead-secs=1200 (20 min aggressive readahead), bufferSize=512MB, stream-buffer-size=2MB, demuxer-seekable-cache=yes
+- **206 response caching fix:** Proxy now caches upstream 206 (Partial Content) HLS segments
+- **Cache stats and clear endpoints:** /cache-stats and /cache-clear for monitoring and management
+
+### Fixed
+
+- Fix 206 status segments not being cached, requiring re-download on replay
+- Fix history replay always re-downloading all segments - now loads from disk cache instantly
+
+### Changed
+
+- Desktop proxy server: VideoCache integration, X-VideoGET-Cache header, /prefetch endpoint
+- Desktop: New PrefetchManager (electron/prefetch-manager.ts), prefetch IPC handlers
+- Desktop: preload exposes startPrefetch/stopPrefetch/getPrefetchStatus/onPrefetchProgress
+- Desktop: App.tsx auto-triggers prefetch on m3u8 playback start
+- Android: mpv cache parameters dramatically increased for full-video prefetch strategy
+
+
 ## [0.0.2] - 2026-08-13
 
 ### 第二版修订

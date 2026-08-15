@@ -19,6 +19,17 @@ const api = {
   getLibrary: (): Promise<LibraryState> => ipcRenderer.invoke('library:get'),
   saveLibrary: (library: LibraryState) => ipcRenderer.invoke('library:save', library),
   openExternal: (url: string) => ipcRenderer.invoke('system:open-external', url),
+  getCacheStats: () => ipcRenderer.invoke('cache:stats'),
+  clearCache: () => ipcRenderer.invoke('cache:clear'),
+  startPrefetch: (url: string) => ipcRenderer.invoke('prefetch:start', url),
+  stopPrefetch: () => ipcRenderer.invoke('prefetch:stop'),
+  getPrefetchStatus: () => ipcRenderer.invoke('prefetch:status'),
+  onPrefetchProgress: (callback: (progress: { total: number; cached: number; fetched: number; failed: number; bytes: number; done: boolean; status: string }) => void) => {
+    ipcRenderer.send('prefetch:progress-listener');
+    const handler = (_event: Electron.IpcRendererEvent, progress: { total: number; cached: number; fetched: number; failed: number; bytes: number; done: boolean; status: string }) => callback(progress);
+    ipcRenderer.on('prefetch:progress', handler);
+    return () => ipcRenderer.removeListener('prefetch:progress', handler);
+  },
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
@@ -30,3 +41,4 @@ const api = {
 };
 
 contextBridge.exposeInMainWorld('lumen', api);
+

@@ -71,16 +71,18 @@ function attachHls(video: HTMLVideoElement, sourceUrl: string, art: Artplayer, p
   const hls = new Hls({
     enableWorker: true,
     lowLatencyMode,
-    maxBufferLength: 30,
-    maxMaxBufferLength: 90,
-    maxBufferSize: 96 * 1024 * 1024,
-    backBufferLength: 30,
+    maxBufferLength: 60,
+    maxMaxBufferLength: 120,
+    maxBufferSize: 128 * 1024 * 1024,
+    backBufferLength: 60,
     startFragPrefetch: true,
-    fragLoadingMaxRetry: 6,
+    fragLoadingMaxRetry: 8,
     fragLoadingRetryDelay: 500,
-    fragLoadingTimeOut: 30_000,
-    manifestLoadingMaxRetry: 3,
-    levelLoadingMaxRetry: 3,
+    fragLoadingTimeOut: 45_000,
+    manifestLoadingMaxRetry: 4,
+    levelLoadingMaxRetry: 4,
+    manifestLoadingTimeOut: 15_000,
+    levelLoadingTimeOut: 15_000,
     startLevel: -1,
     capLevelToPlayerSize: preference === 'auto',
     abrEwmaDefaultEstimate: 1_000_000,
@@ -763,6 +765,10 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
         if (!active || !container.current) return;
         const originalUrl = resolved.url;
         const url = streamUrl(settings, originalUrl, resolved.headers);
+        // Start background prefetch of all HLS segments for smooth playback
+        if (/m3u8(?:$|\?)/i.test(originalUrl) && settings.proxyPort > 0) {
+          void window.lumen.startPrefetch(originalUrl);
+        }
         instance = new Artplayer({
           container: container.current,
           url,
@@ -854,7 +860,7 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
         if (active) setQualityLabel('规则解析失败');
       }
     })();
-    return () => { active = false; saveProgress(); instance?.destroy(false); player.current = null; };
+    return () => { active = false; saveProgress(); instance?.destroy(false); player.current = null; void window.lumen.stopPrefetch(); };
   }, [current?.url, current?.sourceId, lineIndex, episodeIndex, settings.proxyPort, settings.proxyBaseUrl, settings.adFiltering, settings.qualityPreference, playing, onProgress]);
 
   const toggleDanmaku = () => {

@@ -110,7 +110,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _episodeIndex = widget.episodeIndex;
     _resume = widget.resume;
     _player = Player(
-      configuration: const PlayerConfiguration(bufferSize: 128 * 1024 * 1024),
+      configuration: const PlayerConfiguration(bufferSize: 512 * 1024 * 1024),
     );
     _videoController = VideoController(_player);
     _tracksSubscription = _player.stream.tracks.listen(_handleTracks);
@@ -134,12 +134,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _configureMpvCache() async {
     final platform = _player.platform;
     if (platform is NativePlayer) {
+      // Full-video prefetch: cache-secs=86400 (24h, effectively unlimited)
+      // and demuxer-readahead-secs=1200 (20 min aggressive readahead) make
+      // mpv download the entire video as fast as the network allows, well
+      // ahead of the playback position. Combined with a 512 MiB demuxer
+      // buffer and 2 MiB stream buffer, this eliminates stuttering on long
+      // videos and ensures instant seeking within the cached region.
       await Future.wait([
-        platform.setProperty('cache-secs', '90'),
-        platform.setProperty('demuxer-readahead-secs', '45'),
+        platform.setProperty('cache', 'yes'),
+        platform.setProperty('cache-secs', '86400'),
+        platform.setProperty('demuxer-readahead-secs', '1200'),
+        platform.setProperty('demuxer-seekable-cache', 'yes'),
         platform.setProperty('cache-pause', 'yes'),
-        platform.setProperty('cache-pause-wait', '3'),
-        platform.setProperty('network-timeout', '20'),
+        platform.setProperty('cache-pause-wait', '5'),
+        platform.setProperty('network-timeout', '60'),
+        platform.setProperty('stream-buffer-size', '2097152'),
       ]);
     }
   }

@@ -6,6 +6,8 @@ import { aggregateDanmaku } from './danmaku-engine.js';
 import { fetchRemoteText } from './net-client.js';
 import { startProxyServer } from './proxy-server.js';
 import { Storage } from './storage.js';
+import { VideoCache } from './video-cache.js';
+import { PrefetchManager } from './prefetch-manager.js';
 import type { CmsSource, ImportResult, LibraryState, MediaCategory } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,6 +20,8 @@ if (isAutomationRun) {
 }
 let mainWindow: BrowserWindow | null = null;
 let proxy: Awaited<ReturnType<typeof startProxyServer>> | null = null;
+let videoCache: VideoCache | null = null;
+let prefetchManager: PrefetchManager | null = null;
 const storage = new Storage();
 
 async function applyTvBoxImport(config: unknown): Promise<ImportResult> {
@@ -128,15 +132,46 @@ function registerIpc(): void {
     if (/^https?:\/\//i.test(url)) return shell.openExternal(url);
     return false;
   });
+  ipcMain.handle('cache:stats', () => {
+    if (!videoCache) return { size: 0, count: 0, sizeMB: 0 };
+    return { size: videoCache.size, count: videoCache.count, sizeMB: Math.round(videoCache.size / 1024 / 1024 * 100) / 100 };
+  });
+  ipcMain.handle('cache:clear', async () => {
+    if (videoCache) await videoCache.clear();
+    return { size: videoCache?.size ?? 0, count: videoCache?.count ?? 0, sizeMB: 0 };
+  });
   ipcMain.on('window:minimize', () => mainWindow?.minimize());
   ipcMain.on('window:maximize', () => mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize());
   ipcMain.on('window:close', () => mainWindow?.close());
+  ipcMain.handle('prefetch:start', async (_event, url: string) => {
+    if (!prefetchManager || !proxy) return { total: 0, cached: 0, fetched: 0, failed: 0, bytes: 0, done: false, status: 'idle' };
+    void prefetchManager.start(url, proxy.port);
+    return prefetchManager.currentProgress;
+  });
+  ipcMain.handle('prefetch:stop', () => {
+    if (prefetchManager) prefetchManager.stop();
+    return prefetchManager?.currentProgress ?? null;
+  });
+  ipcMain.handle('prefetch:status', () => {
+    return prefetchManager?.currentProgress ?? null;
+  });
+  ipcMain.on('prefetch:progress-listener', (_event) => {
+    if (!prefetchManager || !mainWindow) return;
+    prefetchManager.setProgressCallback((progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('prefetch:progress', progress);
+      }
+    });
+  });
 }
 
 app.whenReady().then(async () => {
   app.setAppUserModelId('com.videoget.desktop');
   await storage.init();
-  proxy = await startProxyServer(path.join(app.getPath('userData'), 'image-cache'));
+  videoCache = new VideoCache(path.join(app.getPath('userData'), 'video-cache'));
+  await videoCache.init();
+  proxy = await startProxyServer(path.join(app.getPath('userData'), 'image-cache'), videoCache);
+  prefetchManager = new PrefetchManager();
   registerIpc();
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
@@ -144,3 +179,4 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => { if (proxy) void proxy.close(); });
+
