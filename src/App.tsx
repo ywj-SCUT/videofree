@@ -283,17 +283,25 @@ function App() {
     }
   }, []);
 
-    useEffect(() => {
-    void Promise.all([window.lumen.getSettings(), window.lumen.getLibrary()]).then(([nextSettings, nextLibrary]) => {
+  useEffect(() => {
+    void Promise.all([window.lumen.getSettings(), window.lumen.getLibrary()]).then(async ([nextSettings, nextLibrary]) => {
+      let library = nextLibrary;
       try {
         const localHistory = JSON.parse(localStorage.getItem('videoget_history') || '[]');
         if (Array.isArray(localHistory) && localHistory.length > 0) {
-          nextLibrary.history = localHistory;
+          const history = [...nextLibrary.history, ...localHistory]
+            .filter((entry): entry is HistoryItem => Boolean(entry?.id && entry?.sourceId))
+            .sort((left, right) => right.watchedAt - left.watchedAt)
+            .filter((entry, index, entries) => index === entries.findIndex((candidate) => candidate.id === entry.id && candidate.sourceId === entry.sourceId))
+            .slice(0, 100);
+          library = { ...nextLibrary, history };
+          await window.lumen.saveLibrary(library);
         }
+        localStorage.removeItem('videoget_history');
       } catch {}
       setSettings(nextSettings);
-      setLibrary(nextLibrary);
-      libraryRef.current = nextLibrary;
+      setLibrary(library);
+      libraryRef.current = library;
     });
     void searchMedia('', 'all');
   }, [searchMedia]);
@@ -318,10 +326,14 @@ function App() {
   };
 
   const openMedia = async (item: MediaItem, historyItem?: HistoryItem) => {
+    setResume(historyItem ?? null);
+    if (historyItem?.playLines?.some((line) => line.episodes.length > 0)) {
+      setSelected(historyItem);
+      return;
+    }
     setLoading(true);
     try {
       const detail = await window.lumen.resolve(item);
-      setResume(historyItem ?? null);
       setSelected(detail ?? item);
     } finally {
       setLoading(false);
@@ -347,13 +359,11 @@ function App() {
     });
   };
 
-    const updateProgress = useCallback((item: MediaItem, progress: number, duration: number, lineName: string, episodeName: string) => {
+  const updateProgress = useCallback((item: MediaItem, progress: number, duration: number, lineName: string, episodeName: string) => {
     updateLibrary((current) => {
       const rest = current.history.filter((entry) => !(entry.id === item.id && entry.sourceId === item.sourceId));
       const historyItem: HistoryItem = { ...item, progress, duration, lineName, episodeName, watchedAt: Date.now() };
-      const nextHistory = [historyItem, ...rest].slice(0, 100);
-      try { localStorage.setItem('videoget_history', JSON.stringify(nextHistory)); } catch {}
-      return { ...current, history: nextHistory };
+      return { ...current, history: [historyItem, ...rest].slice(0, 100) };
     });
   }, [updateLibrary]);
 
@@ -758,6 +768,7 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
     setResumedAt(0);
     let active = true;
     let instance: Artplayer | null = null;
+    let detachVideoListeners: (() => void) | null = null;
     let lastSaved = 0;
     let resumeApplied = false;
     const saveProgress = () => {
@@ -773,10 +784,6 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
         if (!active || !container.current) return;
         const originalUrl = resolved.url;
         const url = streamUrl(settings, originalUrl, resolved.headers);
-        // Start background prefetch of all HLS segments for smooth playback
-        if (/m3u8(?:$|\?)/i.test(originalUrl) && settings.proxyPort > 0) {
-          void window.lumen.startPrefetch(originalUrl);
-        }
         instance = new Artplayer({
           container: container.current,
           url,
@@ -843,17 +850,18 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
         });
         instance.playbackRate = currentSpeed;
         setSpeedLabel(speedLabelStr);
-        instance.on('video:timeupdate', () => {
+        const video = instance.video;
+        const handleTimeUpdate = () => {
           if (Date.now() - lastSaved > 5000) {
             lastSaved = Date.now();
             saveProgress();
           }
-        });
-        instance.on('video:pause', saveProgress);
-        instance.on('video:ended', () => {
+        };
+        const handleEnded = () => {
+          saveProgress();
           if (episodeIndex + 1 < (lines[lineIndex]?.episodes.length ?? 0)) setEpisodeIndex((value) => value + 1);
-        });
-        instance.on('video:loadedmetadata', () => {
+        };
+        const handleLoadedMetadata = () => {
           if (!instance) return;
           const isResumeEpisode = resume?.episodeName === current.name && (!resume.lineName || resume.lineName === lines[lineIndex]?.name);
           if (!resumeApplied && isResumeEpisode && resume.progress > 0 && (!resume.duration || resume.progress < resume.duration - 15)) {
@@ -862,13 +870,24 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
             setResumedAt(instance.currentTime);
           }
           if (!/m3u8(?:$|\?)/i.test(originalUrl) && instance.video.videoHeight > 0) setQualityLabel(`${instance.video.videoHeight}P`);
-        });
+        };
+        video.addEventListener('timeupdate', handleTimeUpdate);
+        video.addEventListener('pause', saveProgress);
+        video.addEventListener('ended', handleEnded);
+        video.addEventListener('loadedmetadata', handleLoadedMetadata);
+        detachVideoListeners = () => {
+          video.removeEventListener('timeupdate', handleTimeUpdate);
+          video.removeEventListener('pause', saveProgress);
+          video.removeEventListener('ended', handleEnded);
+          video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        };
+        if (video.readyState >= HTMLMediaElement.HAVE_METADATA) handleLoadedMetadata();
         player.current = instance;
       } catch {
         if (active) setQualityLabel('规则解析失败');
       }
     })();
-    return () => { active = false; saveProgress(); instance?.destroy(false); player.current = null; void window.lumen.stopPrefetch(); };
+    return () => { active = false; detachVideoListeners?.(); saveProgress(); instance?.destroy(false); player.current = null; };
   }, [current?.url, current?.sourceId, lineIndex, episodeIndex, settings.proxyPort, settings.proxyBaseUrl, settings.adFiltering, settings.qualityPreference, playing, onProgress]);
 
   const toggleDanmaku = () => {

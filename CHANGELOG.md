@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.0.4] - 2026-08-16
+
+### Added
+
+- Windows and Android now keep an on-demand persistent cache for HLS media, including Range/206 responses, with bounded LRU eviction.
+- Android fullscreen playback supports left-side brightness swipes, right-side media-volume swipes, and hold-for-2x playback with automatic speed restoration.
+- HLS ad filtering is available in both clients and preserves active encryption keys and initialization maps when marked ad segments are removed.
+
+### Fixed
+
+- Removed automatic whole-video concurrent prefetching that competed with foreground playback and caused long-video stalls.
+- Desktop history now migrates legacy local history once, saves playback progress from native video events, and opens cached play lines immediately after restart.
+- Desktop library writes are atomic and retain a backup that can restore a damaged primary data file.
+- Android history opens stored play lines immediately while refreshing expired details in the background.
+- Desktop and Android caches now reuse matching Range requests and avoid caching manifests, HTML, JSON, or oversized media objects.
+
+### Verification
+
+- Windows online search returned 16 results for `Avatar`; remote HLS playback stayed ready, grew the disk cache, and replayed a segment with `X-VideoGET-Cache: HIT`.
+- Desktop playback history survived an application restart, opened its stored detail in 34 ms, and resumed the same online stream from `00:45`.
+- Android AVD online search and remote HLS playback completed through `10.0.2.2:7890`; persistent cache, history, brightness, volume, hold-for-2x, and `adb install -r` data preservation were verified.
+
 ## [0.0.3] - 2026-08-15
 
 ### v0.0.3 - Full Video Prefetch & Disk Cache

@@ -1,5 +1,5 @@
 import { app } from 'electron';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DEFAULT_SOURCES } from './default-sources.js';
 import type { AppSettings, LibraryState } from './types.js';
@@ -30,9 +30,19 @@ export class Storage {
     const dir = path.join(app.getPath('userData'), 'data');
     await mkdir(dir, { recursive: true });
     this.file = path.join(dir, 'videoget.json');
+    let parsed: Partial<PersistedData> | null = null;
+    let restoredFromBackup = false;
     try {
-      const raw = await readFile(this.file, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<PersistedData>;
+      parsed = JSON.parse(await readFile(this.file, 'utf8')) as Partial<PersistedData>;
+    } catch {
+      try {
+        parsed = JSON.parse(await readFile(`${this.file}.bak`, 'utf8')) as Partial<PersistedData>;
+        restoredFromBackup = true;
+      } catch {
+        // First launch has no persisted state.
+      }
+    }
+    if (parsed) {
       const needsPlaybackMigration = (parsed.playbackTuningVersion ?? 0) < playbackTuningVersion;
       const persistedSources = parsed.settings?.sources ?? [];
       const enabledById = new Map(persistedSources.map((source) => [source.id, source.enabled]));
@@ -58,9 +68,9 @@ export class Storage {
         },
         library: { ...defaults.library, ...parsed.library },
       };
-      if (needsPlaybackMigration) await this.flush();
-    } catch {
-      await this.flush();
+      if (needsPlaybackMigration || restoredFromBackup) await this.flush(!restoredFromBackup);
+    } else {
+      await this.flush(false);
     }
   }
 
@@ -82,7 +92,18 @@ export class Storage {
     await this.flush();
   }
 
-  private async flush(): Promise<void> {
-    await writeFile(this.file, JSON.stringify(this.data, null, 2), 'utf8');
+  private async flush(backupCurrent = true): Promise<void> {
+    const temporary = `${this.file}.tmp`;
+    const backup = `${this.file}.bak`;
+    await writeFile(temporary, JSON.stringify(this.data, null, 2), 'utf8');
+    if (backupCurrent) {
+      try { await copyFile(this.file, backup); } catch {}
+    }
+    try {
+      await rename(temporary, this.file);
+    } catch (error) {
+      try { await unlink(temporary); } catch {}
+      throw error;
+    }
   }
 }

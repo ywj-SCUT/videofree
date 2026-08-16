@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { filterHlsManifest } from '../dist-electron/hls-filter.js';
 import { startProxyServer } from '../dist-electron/proxy-server.js';
+import { VideoCache } from '../dist-electron/video-cache.js';
 
 const fixture = `#EXTM3U
 #EXT-X-VERSION:3
@@ -36,6 +37,23 @@ assert(filtered.manifest.includes('#EXT-X-MEDIA-SEQUENCE:11'));
 assert(filtered.manifest.includes('main/1.ts') && filtered.manifest.includes('main/2.ts'));
 assert(!filtered.manifest.includes('ad-0.ts') && !filtered.manifest.includes('mid-1.ts'));
 assert(filtered.manifest.includes('#EXT-X-DISCONTINUITY'));
+const falsePositive = filterHlsManifest(`#EXTM3U
+#EXTINF:5,
+pcdn/main-adsorption.ts
+#EXTINF:5,
+media/shadow-play.ts`);
+assert.equal(falsePositive.removedSegments, 0);
+const encrypted = filterHlsManifest(`#EXTM3U
+#EXT-X-MEDIA-SEQUENCE:3
+#EXT-X-KEY:METHOD=AES-128,URI="keys/content.key"
+#EXT-X-MAP:URI="init/content.mp4"
+#EXTINF:5,
+ads/preroll.ts
+#EXTINF:5,
+main/first.m4s`);
+assert(encrypted.manifest.includes('#EXT-X-KEY:METHOD=AES-128,URI="keys/content.key"'));
+assert(encrypted.manifest.includes('#EXT-X-MAP:URI="init/content.mp4"'));
+assert(encrypted.manifest.indexOf('#EXT-X-KEY:') < encrypted.manifest.indexOf('main/first.m4s'));
 
 const cancelledStreams = new Map();
 const upstream = createServer((request, response) => {
@@ -71,7 +89,9 @@ const upstreamAddress = upstream.address();
 assert(upstreamAddress && typeof upstreamAddress === 'object');
 const target = `http://127.0.0.1:${upstreamAddress.port}/playlist.m3u8`;
 const cache = await mkdtemp(path.join(os.tmpdir(), 'videoget-hls-smoke-'));
-const desktop = await startProxyServer(cache);
+const videoCache = new VideoCache(path.join(cache, 'video'));
+await videoCache.init();
+const desktop = await startProxyServer(path.join(cache, 'images'), videoCache);
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -120,7 +140,26 @@ try {
   assert.equal(desktopResponse.headers.get('x-videoget-ad-segments'), '3');
   assert(desktopManifest.includes('filterAds=1') && !desktopManifest.includes('mid-1.ts'));
   const desktopSegment = desktopManifest.split(/\r?\n/).find((line) => line.startsWith('http://127.0.0.1:'));
-  assert(desktopSegment && (await (await fetch(desktopSegment)).arrayBuffer()).byteLength === 24_000);
+  assert(desktopSegment);
+  const firstSegment = await fetch(desktopSegment);
+  assert.equal(firstSegment.headers.get('x-videoget-cache'), 'MISS');
+  assert.equal((await firstSegment.arrayBuffer()).byteLength, 24_000);
+  for (let index = 0; index < 20 && !videoCache.count; index++) await new Promise((resolve) => setTimeout(resolve, 25));
+  const cachedSegment = await fetch(desktopSegment);
+  assert.equal(cachedSegment.headers.get('x-videoget-cache'), 'HIT');
+  assert.equal((await cachedSegment.arrayBuffer()).byteLength, 24_000);
+  const rangeTarget = `http://127.0.0.1:${upstreamAddress.port}/slow.ts?case=range`;
+  const rangeUrl = `http://127.0.0.1:${desktop.port}/stream?url=${encodeURIComponent(rangeTarget)}`;
+  const rangeHeaders = { Range: 'bytes=0-65535' };
+  const firstRange = await fetch(rangeUrl, { headers: rangeHeaders });
+  assert.equal(firstRange.headers.get('x-videoget-cache'), 'MISS');
+  await firstRange.arrayBuffer();
+  for (let index = 0; index < 20 && videoCache.count < 2; index++) await new Promise((resolve) => setTimeout(resolve, 25));
+  const cachedRange = await fetch(rangeUrl, { headers: rangeHeaders });
+  assert.equal(cachedRange.status, 206);
+  assert.equal(cachedRange.headers.get('x-videoget-cache'), 'HIT');
+  assert.match(cachedRange.headers.get('content-range') ?? '', /^bytes 0-/);
+  await cachedRange.arrayBuffer();
   const desktopSlowTarget = `http://127.0.0.1:${upstreamAddress.port}/slow.ts?case=desktop`;
   await abortStream(`http://127.0.0.1:${desktop.port}/stream?url=${encodeURIComponent(desktopSlowTarget)}`, 'desktop');
 
@@ -141,6 +180,8 @@ try {
     removedSegments: 3,
     removedSeconds: 15,
     desktopBytes: 24_000,
+    desktopCacheHit: true,
+    desktopRangeCacheHit: true,
     webBytes: 24_000,
     desktopCancellation: true,
     webCancellation: true,

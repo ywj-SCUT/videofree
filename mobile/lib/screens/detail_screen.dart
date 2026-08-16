@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -33,7 +35,41 @@ class _DetailScreenState extends State<DetailScreen> {
   @override
   void initState() {
     super.initState();
-    _loadDetail();
+    if (widget.item.playLines?.isNotEmpty == true) {
+      _detail = widget.item;
+      _loading = false;
+      _applyResumeSelection(widget.item.playLines!);
+      unawaited(_refreshDetail());
+    } else {
+      _loadDetail();
+    }
+  }
+
+  Future<void> _refreshDetail() async {
+    try {
+      final result = await widget.appState.engine.resolve(
+        widget.item,
+        widget.appState.sources,
+      );
+      if (!mounted || result == null || result.playLines?.isNotEmpty != true) {
+        return;
+      }
+      _applyResumeSelection(result.playLines!);
+      setState(() => _detail = result);
+    } catch (_) {
+      // Cached history remains immediately usable when a source is offline.
+    }
+  }
+
+  void _applyResumeSelection(List<PlayLine> lines) {
+    final resume = widget.appState.getResume(widget.item) ?? widget.resume;
+    if (resume == null || lines.isEmpty) return;
+    final matchLine = lines.indexWhere((line) => line.name == resume.lineName);
+    if (matchLine >= 0) _lineIndex = matchLine;
+    final matchEpisode = lines[_lineIndex].episodes.indexWhere(
+      (episode) => episode.name == resume.episodeName,
+    );
+    if (matchEpisode >= 0) _episodeIndex = matchEpisode;
   }
 
   Future<void> _loadDetail() async {
@@ -48,16 +84,7 @@ class _DetailScreenState extends State<DetailScreen> {
       );
       if (!mounted) return;
       if (result != null && result.playLines?.isNotEmpty == true) {
-        final resume = widget.appState.getResume(widget.item) ?? widget.resume;
-        if (resume != null) {
-          final matchLine = result.playLines!.indexWhere(
-            (line) => line.name == resume.lineName,
-          );
-          if (matchLine >= 0) _lineIndex = matchLine;
-          final matchEpisode = result.playLines![_lineIndex].episodes
-              .indexWhere((episode) => episode.name == resume.episodeName);
-          if (matchEpisode >= 0) _episodeIndex = matchEpisode;
-        }
+        _applyResumeSelection(result.playLines!);
       }
       setState(() {
         _detail = result;

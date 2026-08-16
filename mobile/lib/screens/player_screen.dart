@@ -7,7 +7,9 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../models/models.dart';
 import '../services/app_state.dart';
+import '../services/playback_proxy.dart';
 import '../services/quality_selector.dart';
+import '../services/system_playback_controls.dart';
 import '../theme/app_theme.dart';
 
 bool shouldResumePlayback(HistoryItem? resume, String episodeName) {
@@ -36,8 +38,7 @@ bool isPlaybackToggleDoubleTap(
   Offset currentPosition,
 ) {
   if (previousTime == null || previousPosition == null) return false;
-  return currentTime - previousTime <=
-          const Duration(milliseconds: 350) &&
+  return currentTime - previousTime <= const Duration(milliseconds: 350) &&
       (currentPosition - previousPosition).distance <= 72;
 }
 
@@ -96,13 +97,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Offset? _lastPointerPosition;
   bool _allowPop = false;
 
-  double _brightness = 0.0;
-  double _volume = 100.0;
-  bool _showOverlayInfo = false;
-  String _overlayInfoText = '';
-  Timer? _overlayTimer;
-  double _dragStartY = 0;
-  bool _isDraggingLeft = false;
+  double _brightness = 0.5;
+  double _volume = 0.5;
 
   static const _speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
 
@@ -118,7 +114,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _episodeIndex = widget.episodeIndex;
     _resume = widget.resume;
     _player = Player(
-      configuration: const PlayerConfiguration(bufferSize: 512 * 1024 * 1024),
+      configuration: const PlayerConfiguration(bufferSize: 96 * 1024 * 1024),
     );
     _videoController = VideoController(_player);
     _tracksSubscription = _player.stream.tracks.listen(_handleTracks);
@@ -132,6 +128,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _applyResumeIfReady();
     });
     _bufferingSubscription = _player.stream.buffering.listen(_handleBuffering);
+    unawaited(_loadSystemLevels());
     _openCurrent();
     _saveTimer = Timer.periodic(
       const Duration(seconds: 5),
@@ -142,25 +139,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _configureMpvCache() async {
     final platform = _player.platform;
     if (platform is NativePlayer) {
-      // Full-video prefetch: cache-secs=86400 (24h, effectively unlimited)
-      // and demuxer-readahead-secs=1200 (20 min aggressive readahead) make
-      // mpv download the entire video as fast as the network allows, well
-      // ahead of the playback position. Combined with a 512 MiB demuxer
-      // buffer and 2 MiB stream buffer, this eliminates stuttering on long
-      // videos and ensures instant seeking within the cached region.
       await Future.wait([
         platform.setProperty('cache', 'yes'),
-        platform.setProperty('cache-on-disk', 'yes'), // 开启磁盘缓存
-        platform.setProperty('cache-secs', '86400'),
-        platform.setProperty('demuxer-readahead-secs', '1200'),
+        platform.setProperty('cache-on-disk', 'no'),
+        platform.setProperty('cache-secs', '180'),
+        platform.setProperty('demuxer-readahead-secs', '90'),
         platform.setProperty('demuxer-seekable-cache', 'yes'),
+        platform.setProperty('demuxer-max-back-bytes', '33554432'),
         platform.setProperty('cache-pause', 'yes'),
-        platform.setProperty('cache-pause-wait', '5'),
-        platform.setProperty('network-timeout', '60'),
-        platform.setProperty('stream-buffer-size', '4194304'),
+        platform.setProperty('cache-pause-initial', 'yes'),
+        platform.setProperty('cache-pause-wait', '3'),
+        platform.setProperty('network-timeout', '45'),
+        platform.setProperty('stream-buffer-size', '1048576'),
       ]);
-      try { _volume = await _player.stream.volume.first; } catch (_) {}
     }
+  }
+
+  Future<void> _loadSystemLevels() async {
+    final values = await Future.wait([
+      SystemPlaybackControls.brightness(),
+      SystemPlaybackControls.volume(),
+    ]);
+    _brightness = values[0];
+    _volume = values[1];
   }
 
   void _handleBuffering(bool buffering) {
@@ -280,6 +281,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
         url = resolved.url;
         headers = resolved.headers;
+      }
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        url = (await PlaybackProxy.instance.urlFor(
+          url,
+          headers: headers,
+          filterAds: true,
+        )).toString();
+        headers = null;
       }
       // mpv properties must be set before opening the URL. Otherwise the
       // first HLS demuxer inherits defaults and the cache never reaches the
@@ -408,6 +417,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
               visibleOnMount: true,
               displaySeekBar: true,
               seekOnDoubleTap: false,
+              seekGesture: false,
+              volumeGesture: true,
+              brightnessGesture: true,
+              gesturesEnabledWhileControlsVisible: true,
+              speedUpOnLongPress: true,
+              speedUpFactor: 2.0,
+              initialVolume: _volume,
+              initialBrightness: _brightness,
+              onVolumeChanged: _setSystemVolume,
+              onBrightnessChanged: _setSystemBrightness,
               seekBarMargin: const EdgeInsets.only(
                 left: 16,
                 right: 16,
@@ -498,67 +517,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
     await _player.playOrPause();
   }
 
-  void _showInfo(String text) {
-    if (!mounted) return;
-    setState(() {
-      _overlayInfoText = text;
-      _showOverlayInfo = true;
-    });
-    _overlayTimer?.cancel();
-    _overlayTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _showOverlayInfo = false);
-    });
+  void _setSystemBrightness(double value) {
+    _brightness = value;
+    unawaited(SystemPlaybackControls.setBrightness(value));
   }
 
-  void _handleVerticalDragStart(DragStartDetails details, Size size) {
-    _dragStartY = details.globalPosition.dy;
-    _isDraggingLeft = details.globalPosition.dx < size.width / 2;
-  }
-
-  void _handleVerticalDragUpdate(DragUpdateDetails details, Size size) {
-    final delta = (_dragStartY - details.globalPosition.dy) / size.height;
-    _dragStartY = details.globalPosition.dy;
-    if (_isDraggingLeft) {
-      _brightness = (_brightness + delta * 200).clamp(-100.0, 100.0);
-      if (_player.platform is NativePlayer) {
-        (_player.platform as NativePlayer).setProperty('brightness', _brightness.toInt().toString());
-      }
-      _showInfo('亮度: %');
-    } else {
-      _volume = (_volume + delta * 100).clamp(0.0, 100.0);
-      _player.setVolume(_volume);
-      _showInfo('音量: %');
-    }
+  void _setSystemVolume(double value) {
+    _volume = value;
+    unawaited(SystemPlaybackControls.setVolume(value));
   }
 
   Widget _buildVideoControls(VideoState state) {
     return LayoutBuilder(
-      builder: (context, constraints) => GestureDetector(
-        onVerticalDragStart: (d) => _handleVerticalDragStart(d, Size(constraints.maxWidth, constraints.maxHeight)),
-        onVerticalDragUpdate: (d) => _handleVerticalDragUpdate(d, Size(constraints.maxWidth, constraints.maxHeight)),
-        onLongPressStart: (_) { _setPlaybackRate(2.0); _showInfo('2.0x 播放'); },
-        onLongPressEnd: (_) { _setPlaybackRate(1.0); _showInfo('1.0x 播放'); },
-        child: Listener(
-          key: const ValueKey('player-double-tap-surface'),
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: (event) => _handlePointerDown(
-            event,
-            Size(constraints.maxWidth, constraints.maxHeight),
-          ),
-          child: Stack(
-            children: [
-              MaterialVideoControls(state),
-              if (_showOverlayInfo)
-                Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
-                    child: Text(_overlayInfoText, style: const TextStyle(color: Colors.white, fontSize: 16)),
-                  ),
-                ),
-            ],
-          ),
+      builder: (gestureContext, constraints) => Listener(
+        key: const ValueKey('player-double-tap-surface'),
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (event) => _handlePointerDown(
+          event,
+          Size(constraints.maxWidth, constraints.maxHeight),
         ),
+        child: MaterialVideoControls(state),
       ),
     );
   }

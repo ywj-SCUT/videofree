@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile, stat, unlink, readdir, rename } from 'node:
 import path from 'node:path';
 
 const MAX_CACHE_SIZE = 2 * 1024 * 1024 * 1024; // 2 GB
-const MAX_SEGMENT_SIZE = 100 * 1024 * 1024; // 100 MB per segment
+export const MAX_CACHE_ENTRY_SIZE = 100 * 1024 * 1024; // 100 MB per segment
 const EVICT_RATIO = 0.9; // Evict down to 90% of max
 
 const CACHEABLE_EXTENSIONS = new Set([
@@ -20,14 +20,6 @@ export function isCacheableSegment(url: string, contentType: string): boolean {
   } catch {
     return false;
   }
-  if (pathname.toLowerCase().endsWith('.m3u8')) return false;
-  const ext = path.extname(pathname).toLowerCase();
-  if (CACHEABLE_EXTENSIONS.has(ext)) return true;
-  // 增加范围：如果不含 m3u8，直接放行常见切片和视频
-  if (/^(video\/|audio\/|application\/octet-stream)/i.test(contentType)) return true;
-  if (!ext && contentType === 'text/plain') return true;
-  return true; // 默认所有非 m3u8 的片段都尝试缓存
-}
   if (pathname.toLowerCase().endsWith('.m3u8')) return false;
   const ext = path.extname(pathname).toLowerCase();
   if (CACHEABLE_EXTENSIONS.has(ext)) return true;
@@ -104,7 +96,7 @@ export class VideoCache {
       pending = (async () => {
         try {
           const result = await fetcher();
-          if (result.status === 200 && result.buffer.length > 0 && result.buffer.length <= MAX_SEGMENT_SIZE) {
+          if (result.status === 200 && result.buffer.length > 0 && result.buffer.length <= MAX_CACHE_ENTRY_SIZE) {
             await this.put(url, result.buffer);
           }
           return result.buffer;
@@ -125,7 +117,7 @@ export class VideoCache {
   }
 
   async put(url: string, data: Buffer): Promise<void> {
-    if (data.length === 0 || data.length > MAX_SEGMENT_SIZE) return;
+    if (data.length === 0 || data.length > MAX_CACHE_ENTRY_SIZE) return;
     const key = this.keyOf(url);
     const tempPath = path.join(this.dir, `${key}.tmp`);
     const finalPath = path.join(this.dir, key);

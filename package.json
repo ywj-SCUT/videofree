@@ -24,7 +24,7 @@
     "tauri:prepare": "npm run web:build && node scripts/prepare-tauri.mjs",
     "tauri:dev": "npm run tauri:prepare && tauri dev --no-watch",
     "tauri:build": "tauri build",
-    "dist": "npm run build && electron-builder --win nsis portable",
+    "dist": "npm run build && electron-builder --win nsis",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p web/tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -73,12 +73,6 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
       ]
     },
@@ -88,9 +82,6 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
-    },
-    "portable": {
-      "artifactName": "VideoGET-Portable-${version}-${arch}.${ext}"
     }
   },
   "allowScripts": {}

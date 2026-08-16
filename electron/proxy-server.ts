@@ -6,7 +6,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { fetch as undiciFetch, ProxyAgent } from 'undici';
 import { filterHlsManifest } from './hls-filter.js';
-import { VideoCache, isCacheableSegment } from './video-cache.js';
+import { MAX_CACHE_ENTRY_SIZE, VideoCache, isCacheableSegment } from './video-cache.js';
 
 const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
@@ -166,6 +166,23 @@ function parseRange(range: string, total: number): { start: number; end: number 
   return { start, end: Math.min(end, total - 1) };
 }
 
+function cacheIdentity(target: string, headers: Record<string, string>, range?: string): string {
+  const headerKey = Object.entries(headers)
+    .filter(([name]) => !['user-agent', 'accept', 'range'].includes(name.toLowerCase()))
+    .sort(([left], [right]) => left.toLowerCase().localeCompare(right.toLowerCase()))
+    .map(([name, value]) => `${name.toLowerCase()}:${value}`)
+    .join('\n');
+  return headerKey || range ? `${target}\n${headerKey}\nrange:${range ?? ''}` : target;
+}
+
+function cachedRangeHeader(range: string, size: number): string | null {
+  const match = /^bytes=(\d+)-(\d*)$/i.exec(range);
+  if (!match) return null;
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : start + size - 1;
+  return `bytes ${start}-${Math.min(requestedEnd, start + size - 1)}/*`;
+}
+
 export async function startProxyServer(cacheDirectory: string, videoCache?: VideoCache): Promise<{ port: number; close: () => Promise<void> }> {
   let port = 0;
   await mkdir(cacheDirectory, { recursive: true });
@@ -300,17 +317,19 @@ export async function startProxyServer(cacheDirectory: string, videoCache?: Vide
       const referer = incoming.searchParams.get('referer');
       const filterAds = incoming.searchParams.get('filterAds') === '1';
       if (referer) headers.Referer = referer;
+      const range = request.headers.range;
+      const cacheKey = cacheIdentity(target, headers, range);
 
       // --- Cache fast-path for video segments ---
-      // When the request has no Range header and the URL is a cacheable
-      // segment, we can serve from the disk cache without hitting upstream.
-      if (videoCache && !request.headers.range) {
-        const cached = await videoCache.get(target);
+      if (videoCache) {
+        const cached = await videoCache.get(cacheKey);
         if (cached) {
-          response.writeHead(200, {
+          const cachedRange = range ? cachedRangeHeader(range, cached.length) : null;
+          response.writeHead(range ? 206 : 200, {
             'Content-Type': 'application/octet-stream',
             'Content-Length': cached.length,
             'Accept-Ranges': 'bytes',
+            ...(cachedRange ? { 'Content-Range': cachedRange } : {}),
             'Cache-Control': 'public, max-age=86400, immutable',
             'X-VideoGET-Cache': 'HIT',
           });
@@ -320,7 +339,7 @@ export async function startProxyServer(cacheDirectory: string, videoCache?: Vide
       }
 
       // Forward Range header for upstream requests
-      if (request.headers.range) headers.Range = request.headers.range;
+      if (range) headers.Range = range;
       const upstream = await fetchStream(target, headers, streamOutboundProxy, streamRoutePreferences, controller.signal);
       if (!upstream.ok && upstream.status !== 206) {
         response.writeHead(upstream.status).end(`Upstream HTTP ${upstream.status}`);
@@ -343,7 +362,13 @@ export async function startProxyServer(cacheDirectory: string, videoCache?: Vide
       }
 
       // --- Cache write-path for cacheable segments ---
-      const cacheable = videoCache && !request.headers.range && (upstream.status === 200 || upstream.status === 206) && isCacheableSegment(target, contentType);
+      const declaredLength = Number(upstream.headers.get('content-length') ?? 0);
+      let cacheable = Boolean(
+        videoCache
+        && (upstream.status === 200 || upstream.status === 206)
+        && isCacheableSegment(target, contentType)
+        && (!declaredLength || declaredLength <= MAX_CACHE_ENTRY_SIZE),
+      );
 
       const forwarded = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control'];
       for (const name of forwarded) {
@@ -357,12 +382,20 @@ export async function startProxyServer(cacheDirectory: string, videoCache?: Vide
         return;
       }
       const chunks: Buffer[] = [];
+      let cachedBytes = 0;
       const reader = upstream.body.getReader();
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = Buffer.from(value);
-        if (cacheable) chunks.push(chunk);
+        if (cacheable) {
+          cachedBytes += chunk.length;
+          if (cachedBytes <= MAX_CACHE_ENTRY_SIZE) chunks.push(chunk);
+          else {
+            cacheable = false;
+            chunks.length = 0;
+          }
+        }
         if (!response.write(chunk)) {
           if (!await waitForDrain(response)) {
             await reader.cancel();
@@ -374,7 +407,7 @@ export async function startProxyServer(cacheDirectory: string, videoCache?: Vide
       // Persist to disk cache asynchronously after the client has received
       // all data, so streaming latency is unaffected.
       if (cacheable && chunks.length > 0) {
-        void videoCache!.put(target, Buffer.concat(chunks));
+        void videoCache!.put(cacheKey, Buffer.concat(chunks));
       }
     } catch (error) {
       if (request.aborted || response.destroyed) return;

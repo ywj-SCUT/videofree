@@ -24,8 +24,7 @@ function durationFromExtinf(line: string): number {
 function adUri(uri: string): boolean {
   try {
     const parsed = new URL(uri, 'https://fixture.invalid');
-    // 放宽广告特征过滤
-    return /(?:^|[./_-])(?:ads?|advert|commercial|preroll|midroll|postroll|pcdn|adserver|click|sponsor)(?:[./_-]|$)/i.test(${parsed.hostname});
+    return /(?:^|[./_-])(?:ads?|advert|adserver|commercial|preroll|midroll|postroll)(?:[./_-]|$)/i.test(`${parsed.hostname}${parsed.pathname}`);
   } catch {
     return false;
   }
@@ -82,6 +81,10 @@ export function filterHlsManifest(manifest: string): HlsFilterResult {
   let removedBeforeFirstKept = 0;
   let keptSegments = 0;
   let needsDiscontinuity = false;
+  let activeKey: string | null = null;
+  let activeMap: string | null = null;
+  let emittedKey: string | null = null;
+  let emittedMap: string | null = null;
 
   for (const entry of entries) {
     if ('raw' in entry) {
@@ -95,6 +98,11 @@ export function filterHlsManifest(manifest: string): HlsFilterResult {
       continue;
     }
     const block = entry.segment;
+    for (const tag of block.tags) {
+      const trimmed = tag.trim();
+      if (/^#EXT-X-KEY:/i.test(trimmed)) activeKey = tag;
+      if (/^#EXT-X-MAP:/i.test(trimmed)) activeMap = tag;
+    }
     const hasCueIn = block.tags.some((tag) => /^#EXT-X-CUE-IN/i.test(tag.trim()));
     const hasCueOut = block.tags.some((tag) => /^#EXT-X-CUE-OUT/i.test(tag.trim()));
     if (hasCueIn) inCue = false;
@@ -117,8 +125,19 @@ export function filterHlsManifest(manifest: string): HlsFilterResult {
       continue;
     }
     const tags = block.tags.filter((tag) => !markerTag.test(tag.trim()) && !adDateRange(tag.trim()).ad);
+    const hasKey = tags.some((tag) => /^#EXT-X-KEY:/i.test(tag.trim()));
+    const hasMap = tags.some((tag) => /^#EXT-X-MAP:/i.test(tag.trim()));
+    const restoredState: string[] = [];
+    if (!hasKey && activeKey && activeKey !== emittedKey) restoredState.push(activeKey);
+    if (!hasMap && activeMap && activeMap !== emittedMap) restoredState.push(activeMap);
+    tags.unshift(...restoredState);
     if (needsDiscontinuity && !tags.some((tag) => /^#EXT-X-DISCONTINUITY/i.test(tag.trim()))) tags.unshift('#EXT-X-DISCONTINUITY');
     output.push({ segment: { ...block, tags } });
+    for (const tag of tags) {
+      const trimmed = tag.trim();
+      if (/^#EXT-X-KEY:/i.test(trimmed)) emittedKey = tag;
+      if (/^#EXT-X-MAP:/i.test(trimmed)) emittedMap = tag;
+    }
     keptSegments++;
     needsDiscontinuity = false;
   }
