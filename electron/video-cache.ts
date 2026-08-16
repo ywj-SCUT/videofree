@@ -23,6 +23,14 @@ export function isCacheableSegment(url: string, contentType: string): boolean {
   if (pathname.toLowerCase().endsWith('.m3u8')) return false;
   const ext = path.extname(pathname).toLowerCase();
   if (CACHEABLE_EXTENSIONS.has(ext)) return true;
+  // 增加范围：如果不含 m3u8，直接放行常见切片和视频
+  if (/^(video\/|audio\/|application\/octet-stream)/i.test(contentType)) return true;
+  if (!ext && contentType === 'text/plain') return true;
+  return true; // 默认所有非 m3u8 的片段都尝试缓存
+}
+  if (pathname.toLowerCase().endsWith('.m3u8')) return false;
+  const ext = path.extname(pathname).toLowerCase();
+  if (CACHEABLE_EXTENSIONS.has(ext)) return true;
   if (CACHEABLE_CONTENT_TYPES.test(contentType)) return true;
   return false;
 }

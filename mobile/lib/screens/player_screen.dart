@@ -96,6 +96,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Offset? _lastPointerPosition;
   bool _allowPop = false;
 
+  double _brightness = 0.0;
+  double _volume = 100.0;
+  bool _showOverlayInfo = false;
+  String _overlayInfoText = '';
+  Timer? _overlayTimer;
+  double _dragStartY = 0;
+  bool _isDraggingLeft = false;
+
   static const _speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
 
   String _rateLabel(double rate) {
@@ -142,14 +150,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // videos and ensures instant seeking within the cached region.
       await Future.wait([
         platform.setProperty('cache', 'yes'),
+        platform.setProperty('cache-on-disk', 'yes'), // 开启磁盘缓存
         platform.setProperty('cache-secs', '86400'),
         platform.setProperty('demuxer-readahead-secs', '1200'),
         platform.setProperty('demuxer-seekable-cache', 'yes'),
         platform.setProperty('cache-pause', 'yes'),
         platform.setProperty('cache-pause-wait', '5'),
         platform.setProperty('network-timeout', '60'),
-        platform.setProperty('stream-buffer-size', '2097152'),
+        platform.setProperty('stream-buffer-size', '4194304'),
       ]);
+      try { _volume = await _player.stream.volume.first; } catch (_) {}
     }
   }
 
@@ -488,16 +498,67 @@ class _PlayerScreenState extends State<PlayerScreen> {
     await _player.playOrPause();
   }
 
+  void _showInfo(String text) {
+    if (!mounted) return;
+    setState(() {
+      _overlayInfoText = text;
+      _showOverlayInfo = true;
+    });
+    _overlayTimer?.cancel();
+    _overlayTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _showOverlayInfo = false);
+    });
+  }
+
+  void _handleVerticalDragStart(DragStartDetails details, Size size) {
+    _dragStartY = details.globalPosition.dy;
+    _isDraggingLeft = details.globalPosition.dx < size.width / 2;
+  }
+
+  void _handleVerticalDragUpdate(DragUpdateDetails details, Size size) {
+    final delta = (_dragStartY - details.globalPosition.dy) / size.height;
+    _dragStartY = details.globalPosition.dy;
+    if (_isDraggingLeft) {
+      _brightness = (_brightness + delta * 200).clamp(-100.0, 100.0);
+      if (_player.platform is NativePlayer) {
+        (_player.platform as NativePlayer).setProperty('brightness', _brightness.toInt().toString());
+      }
+      _showInfo('亮度: %');
+    } else {
+      _volume = (_volume + delta * 100).clamp(0.0, 100.0);
+      _player.setVolume(_volume);
+      _showInfo('音量: %');
+    }
+  }
+
   Widget _buildVideoControls(VideoState state) {
     return LayoutBuilder(
-      builder: (context, constraints) => Listener(
-        key: const ValueKey('player-double-tap-surface'),
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (event) => _handlePointerDown(
-          event,
-          Size(constraints.maxWidth, constraints.maxHeight),
+      builder: (context, constraints) => GestureDetector(
+        onVerticalDragStart: (d) => _handleVerticalDragStart(d, Size(constraints.maxWidth, constraints.maxHeight)),
+        onVerticalDragUpdate: (d) => _handleVerticalDragUpdate(d, Size(constraints.maxWidth, constraints.maxHeight)),
+        onLongPressStart: (_) { _setPlaybackRate(2.0); _showInfo('2.0x 播放'); },
+        onLongPressEnd: (_) { _setPlaybackRate(1.0); _showInfo('1.0x 播放'); },
+        child: Listener(
+          key: const ValueKey('player-double-tap-surface'),
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (event) => _handlePointerDown(
+            event,
+            Size(constraints.maxWidth, constraints.maxHeight),
+          ),
+          child: Stack(
+            children: [
+              MaterialVideoControls(state),
+              if (_showOverlayInfo)
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                    child: Text(_overlayInfoText, style: const TextStyle(color: Colors.white, fontSize: 16)),
+                  ),
+                ),
+            ],
+          ),
         ),
-        child: MaterialVideoControls(state),
       ),
     );
   }

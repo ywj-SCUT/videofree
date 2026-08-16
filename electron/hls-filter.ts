@@ -24,7 +24,8 @@ function durationFromExtinf(line: string): number {
 function adUri(uri: string): boolean {
   try {
     const parsed = new URL(uri, 'https://fixture.invalid');
-    return /(?:^|[./_-])(?:ads?|advert|commercial|preroll|midroll|postroll)(?:[./_-]|$)/i.test(`${parsed.hostname}${parsed.pathname}`);
+    // 放宽广告特征过滤
+    return /(?:^|[./_-])(?:ads?|advert|commercial|preroll|midroll|postroll|pcdn|adserver|click|sponsor)(?:[./_-]|$)/i.test(${parsed.hostname});
   } catch {
     return false;
   }

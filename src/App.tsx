@@ -283,8 +283,14 @@ function App() {
     }
   }, []);
 
-  useEffect(() => {
+    useEffect(() => {
     void Promise.all([window.lumen.getSettings(), window.lumen.getLibrary()]).then(([nextSettings, nextLibrary]) => {
+      try {
+        const localHistory = JSON.parse(localStorage.getItem('videoget_history') || '[]');
+        if (Array.isArray(localHistory) && localHistory.length > 0) {
+          nextLibrary.history = localHistory;
+        }
+      } catch {}
       setSettings(nextSettings);
       setLibrary(nextLibrary);
       libraryRef.current = nextLibrary;
@@ -341,11 +347,13 @@ function App() {
     });
   };
 
-  const updateProgress = useCallback((item: MediaItem, progress: number, duration: number, lineName: string, episodeName: string) => {
+    const updateProgress = useCallback((item: MediaItem, progress: number, duration: number, lineName: string, episodeName: string) => {
     updateLibrary((current) => {
       const rest = current.history.filter((entry) => !(entry.id === item.id && entry.sourceId === item.sourceId));
       const historyItem: HistoryItem = { ...item, progress, duration, lineName, episodeName, watchedAt: Date.now() };
-      return { ...current, history: [historyItem, ...rest].slice(0, 100) };
+      const nextHistory = [historyItem, ...rest].slice(0, 100);
+      try { localStorage.setItem('videoget_history', JSON.stringify(nextHistory)); } catch {}
+      return { ...current, history: nextHistory };
     });
   }, [updateLibrary]);
 
@@ -706,7 +714,7 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
       <div className="add-source"><input value={danmakuName} onChange={(event) => setDanmakuName(event.target.value)} placeholder="来源名称" /><input value={danmakuApi} onChange={(event) => setDanmakuApi(event.target.value)} placeholder="DandanPlay / LogVar 兼容 API 地址" /><button className="primary-button" onClick={addDanmakuProvider}><Plus size={16} />添加</button></div>
       <div className="source-list">{settings.danmakuProviders.map((provider) => <div className={provider.type === 'bilibili' ? 'source-row builtin' : 'source-row'} key={provider.id}><button className={provider.enabled ? 'toggle on' : 'toggle'} onClick={() => void saveDanmakuProviders(settings.danmakuProviders.map((entry) => entry.id === provider.id ? { ...entry, enabled: !entry.enabled } : entry))}><span /></button><div><strong>{provider.name}</strong><small>{provider.type === 'bilibili' ? '内置番剧匹配与弹幕 XML' : provider.api}</small></div>{provider.type !== 'bilibili' && <button className="icon-button danger" aria-label="删除弹幕来源" title="删除弹幕来源" onClick={() => void saveDanmakuProviders(settings.danmakuProviders.filter((entry) => entry.id !== provider.id))}><Trash2 size={16} /></button>}</div>)}</div>
     </section>
-    <section className="settings-section about"><div className="settings-heading"><div><h2>关于 VideoGET</h2><p>本地优先的桌面聚合播放器 · 版本 0.1.0</p></div></div><div className="about-grid"><span><MonitorPlay size={18} />Electron 桌面端</span><span><Star size={18} />ArtPlayer + HLS.js</span><span><Check size={18} />数据保存在本机</span></div></section>
+    <section className="settings-section about"><div className="settings-heading"><div><h2>关于 VideoGET</h2><p>本地优先的桌面聚合播放器 · 版本 0.0.4</p></div></div><div className="about-grid"><span><MonitorPlay size={18} />Electron 桌面端</span><span><Star size={18} />ArtPlayer + HLS.js</span><span><Check size={18} />数据保存在本机</span></div></section>
   </div>;
 }
 
