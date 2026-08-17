@@ -25,6 +25,7 @@
     "tauri:dev": "npm run tauri:prepare && tauri dev --no-watch",
     "tauri:build": "tauri build",
     "dist": "npm run build && electron-builder --win nsis",
+    "verify:android-signature": "pwsh -NoProfile -File scripts/verify-android-signature.ps1",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p web/tsconfig.json --noEmit"
   },
   "dependencies": {

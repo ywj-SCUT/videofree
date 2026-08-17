@@ -15,3 +15,9 @@ src-tauri/resources/server/
 src-tauri/gen/
 .DS_Store
 Thumbs.db
+
+# The Android release key must stay local. Its public fingerprint and policy
+# are tracked in .signing/README.md and EXPECTED_CERT_SHA256.
+.signing/*.keystore
+.signing/*.jks
+.signing/*.p12

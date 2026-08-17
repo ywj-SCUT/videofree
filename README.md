@@ -227,6 +227,8 @@ flutter run
 $env:PUB_CACHE = 'D:\flutter-pub-cache'
 Set-Location .\mobile
 flutter build apk --release
+Set-Location ..
+npm run verify:android-signature
 ```
 
 输出文件为 `mobile/build/app/outputs/flutter-apk/app-release.apk`。发布时可复制并按版本命名为 `release/VideoGET-Android-v<version>.apk`。
@@ -235,7 +237,13 @@ flutter build apk --release
 
 Android 通过应用 ID 和签名证书共同确认更新关系。同一应用的后续版本必须持续使用同一把签名密钥；正常发布不会每个版本更换签名。密钥变化后，系统会把新 APK 视为签名不匹配，不能直接覆盖已安装版本。
 
-当前 `v0.0.3` APK 为了兼容已有 `v0.0.2` 安装，继续使用同一调试密钥签名。正式、长期分发时应配置专用 release keystore，妥善备份密钥和密码，并确保所有后续版本都使用它；切换到新密钥前需要评估现有安装用户的升级路径。
+VideoGET Android 发布签名已固定为手机现有 `v0.0.3` 使用的证书：
+
+```text
+SHA-256: f9a529fd73bb2193a805e6b2d09d39cf4f006d998aaa3e7b85f6a841391b5e1a
+```
+
+私钥固定存放在工作目录的 `.signing/videoget-release.keystore`，该文件被 Git 忽略；公开指纹、备份校验值和恢复规则记录在 `.signing/README.md`。Gradle 在配置 release 构建时会读取该固定密钥并校验证书指纹，密钥缺失或被替换会直接终止构建。发布 APK 后还必须运行 `npm run verify:android-signature`，禁止重新生成密钥或退回默认 `debug` signingConfig。
 
 ### 网络代理
 
@@ -288,7 +296,7 @@ videofree/
 
 ### Android 提示签名不一致，不能覆盖安装
 
-确认新旧 APK 的应用 ID 和签名证书一致。不要先卸载仍需保留数据的旧版本。开发环境中还要确认构建使用的是原版本对应的 keystore，而不是另一台电脑新生成的调试密钥。
+确认新旧 APK 的应用 ID 都是 `com.videoget.mobile`，证书 SHA-256 都是 `f9a529fd73bb2193a805e6b2d09d39cf4f006d998aaa3e7b85f6a841391b5e1a`。不要先卸载仍需保留数据的旧版本，也不要使用其他电脑自动生成的调试密钥。密钥缺失时必须从备份恢复 `.signing/videoget-release.keystore`。
 
 ### Windows 播放占用较多磁盘空间
 

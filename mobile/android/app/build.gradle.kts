@@ -1,7 +1,42 @@
+import java.security.KeyStore
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val fixedReleaseKeystore = rootProject.file("../../.signing/videoget-release.keystore")
+val fixedReleaseStorePassword = "android"
+val fixedReleaseKeyAlias = "androiddebugkey"
+val fixedReleaseKeyPassword = "android"
+val expectedReleaseCertificateSha256 =
+    "f9a529fd73bb2193a805e6b2d09d39cf4f006d998aaa3e7b85f6a841391b5e1a"
+
+check(fixedReleaseKeystore.isFile) {
+    "Missing fixed VideoGET signing key: ${fixedReleaseKeystore.absolutePath}. " +
+        "Restore the existing key; never generate a replacement."
+}
+
+val fixedReleaseKeyStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+    fixedReleaseKeystore.inputStream().use {
+        load(it, fixedReleaseStorePassword.toCharArray())
+    }
+}
+val fixedReleaseCertificate = checkNotNull(
+    fixedReleaseKeyStore.getCertificate(fixedReleaseKeyAlias),
+) {
+    "Alias $fixedReleaseKeyAlias is missing from ${fixedReleaseKeystore.absolutePath}."
+}
+val actualReleaseCertificateSha256 = MessageDigest.getInstance("SHA-256")
+    .digest(fixedReleaseCertificate.encoded)
+    .joinToString("") { byte ->
+        (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+    }
+check(actualReleaseCertificateSha256 == expectedReleaseCertificateSha256) {
+    "VideoGET signing certificate changed: expected " +
+        "$expectedReleaseCertificateSha256, got $actualReleaseCertificateSha256."
 }
 
 val generatedPluginRegistrant = layout.projectDirectory.file(
@@ -58,9 +93,18 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("fixedRelease") {
+            storeFile = fixedReleaseKeystore
+            storePassword = fixedReleaseStorePassword
+            keyAlias = fixedReleaseKeyAlias
+            keyPassword = fixedReleaseKeyPassword
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("fixedRelease")
         }
     }
 }
