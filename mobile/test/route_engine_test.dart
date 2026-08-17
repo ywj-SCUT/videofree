@@ -75,7 +75,7 @@ void main() {
     expect(ranked.first.name, '稳定直连线路');
   });
 
-  test('实时健康时已验证稳定线路优先于短时 HTTP 突发', () async {
+  test('实时低延迟线路优先于已过期的历史稳定先验', () async {
     final engine = RouteEngine(
       probe:
           (
@@ -112,7 +112,7 @@ void main() {
       ),
     ]);
 
-    expect(ranked.first.name, '完整播放验证线路');
+    expect(ranked.first.name, '短时探测较快线路');
   });
 
   test('完整播放验证线路实时探测失败时不会被硬置顶', () async {
@@ -189,9 +189,7 @@ void main() {
       ),
       PlayLine(
         name: '持续播放线路',
-        episodes: [
-          Episode(name: '第1集', url: 'https://stable.test/video.mp4'),
-        ],
+        episodes: [Episode(name: '第1集', url: 'https://stable.test/video.mp4')],
       ),
     ]);
 

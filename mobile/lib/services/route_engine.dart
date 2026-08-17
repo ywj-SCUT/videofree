@@ -33,11 +33,9 @@ class RouteEngine {
 
   static final Map<String, _RouteHealth> _health = {};
   static const Map<String, double> _validatedStabilityPrior = {
-    // This route passed cold start, sustained playback, and distant seeks on
-    // both desktop and Android. Keep the bonus below a live probe failure so
-    // current availability always wins, while preventing a malformed stream
-    // with a fast HTTP response from displacing it.
-    'builtin-line-b': 350,
+    // Historical success is only a tie-breaker. Current latency, throughput,
+    // and decoded playback health must dominate when a route degrades later.
+    'builtin-line-b': 45,
   };
   static const Map<String, double> _observedUnreliablePenalty = {
     // Two real AVD runs produced corrupt AAC frames and a zero-position stall
@@ -172,6 +170,7 @@ class RouteEngine {
     var bandwidth = 0;
     var manifestLatency = manifestProbe.elapsed;
     var usedProxy = manifestProbe.usedProxy;
+    var mediaHeaders = _headersWithReferer(episode.headers, manifestUrl);
     final variants = _parseVariants(manifest, manifestUrl);
     if (variants.isNotEmpty) {
       final withinLimit = variants
@@ -199,6 +198,7 @@ class RouteEngine {
       manifest = _decode(mediaProbe.bytes);
       manifestLatency += mediaProbe.elapsed;
       usedProxy = usedProxy || mediaProbe.usedProxy;
+      mediaHeaders = _headersWithReferer(episode.headers, manifestUrl);
     }
     // Probe the opening pair plus distant VOD anchors. Keeping this bounded
     // protects cold playback from route probes consuming the same source
@@ -223,15 +223,31 @@ class RouteEngine {
       segmentProbes.add(
         await _load(
           segmentUrl.toString(),
-          headers: episode.headers,
+          headers: mediaHeaders,
           timeout: _stageTimeout(deadline),
           maxBytes: 128 * 1024,
         ),
       );
     }
-    if (segmentProbes.any((probe) => probe.bytes.isEmpty)) {
+    if (segmentProbes.any(_isInvalidMediaProbe)) {
       recordPlaybackFailure(episode);
       return _RouteResult.failed(candidate.index);
+    }
+    // Encrypted HLS can expose a healthy manifest and media-sized error page
+    // while the key endpoint is blocked. Probe the first key through the same
+    // NetService transport so the route is not ranked above a playable line.
+    final keyUrls = _keyUrls(manifest, manifestUrl, limit: 1);
+    for (final keyUrl in keyUrls) {
+      final keyProbe = await _load(
+        keyUrl.toString(),
+        headers: mediaHeaders,
+        timeout: _stageTimeout(deadline),
+        maxBytes: 16 * 1024,
+      );
+      if (_isInvalidMediaProbe(keyProbe)) {
+        recordPlaybackFailure(episode);
+        return _RouteResult.failed(candidate.index);
+      }
     }
     final slowestSegment = segmentProbes
         .map((probe) => probe.elapsed)
@@ -257,12 +273,18 @@ class RouteEngine {
     Map<String, String>? headers,
     required Duration timeout,
     required int maxBytes,
-  }) => (_probe ?? _net.probeRemote)(
-    url,
-    headers: headers,
-    timeout: timeout,
-    maxBytes: maxBytes,
-  );
+  }) {
+    final probe = _probe;
+    if (probe != null) {
+      return probe(url, headers: headers, timeout: timeout, maxBytes: maxBytes);
+    }
+    return _net.probeRemote(
+      url,
+      headers: headers,
+      timeout: timeout,
+      maxBytes: maxBytes,
+    );
+  }
 
   Duration _stageTimeout(DateTime deadline) {
     final remaining = deadline.difference(DateTime.now());
@@ -446,6 +468,61 @@ class RouteEngine {
       elapsed += math.max(0, entry.duration);
     }
     return result;
+  }
+
+  List<Uri> _keyUrls(String manifest, Uri base, {required int limit}) {
+    final result = <Uri>[];
+    final seen = <String>{};
+    for (final line in manifest.split(RegExp(r'\r?\n'))) {
+      if (!line.trim().toUpperCase().startsWith('#EXT-X-KEY:')) continue;
+      final method = RegExp(
+        r'(?:^|,)METHOD=([^,]+)',
+        caseSensitive: false,
+      ).firstMatch(line)?.group(1)?.trim().toUpperCase();
+      if (method == null || method == 'NONE') continue;
+      final value = RegExp(
+        r'URI="([^"]+)"',
+        caseSensitive: false,
+      ).firstMatch(line)?.group(1);
+      if (value == null || value.isEmpty) continue;
+      final uri = base.resolve(value);
+      if ({'http', 'https'}.contains(uri.scheme) && seen.add(uri.toString())) {
+        result.add(uri);
+        if (result.length >= limit) break;
+      }
+    }
+    return result;
+  }
+
+  Map<String, String>? _headersWithReferer(
+    Map<String, String>? headers,
+    Uri referer,
+  ) {
+    final result = {...?headers};
+    if (!result.keys.any((key) => key.toLowerCase() == 'referer')) {
+      result['Referer'] = referer.toString();
+    }
+    return result;
+  }
+
+  bool _isInvalidMediaProbe(RemoteProbe probe) {
+    if (probe.bytes.isEmpty) return true;
+    final type = probe.contentType.toLowerCase();
+    if (type.contains('text/html') || type.contains('application/json')) {
+      return true;
+    }
+    final prefix = utf8
+        .decode(
+          probe.bytes.sublist(0, math.min(probe.bytes.length, 256)),
+          allowMalformed: true,
+        )
+        .trimLeft()
+        .toLowerCase();
+    return prefix.startsWith('<!doctype') ||
+        prefix.startsWith('<html') ||
+        prefix.startsWith('{"error"') ||
+        prefix.startsWith('access denied') ||
+        prefix.startsWith('request blocked');
   }
 
   double _throughput(RemoteProbe probe) {

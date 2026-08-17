@@ -34,6 +34,11 @@ bool shouldApplyResumeSeek(
 
 const playbackReadyProgressThreshold = Duration(seconds: 3);
 const playbackRouteHealthThreshold = Duration(seconds: 8);
+const playbackResetPositionThreshold = Duration(seconds: 1);
+const playbackResetRecoveryDelay = Duration(seconds: 4);
+const playbackBufferRecoveryDelay = Duration(seconds: 6);
+const playbackSlowProgressWindow = Duration(seconds: 6);
+const playbackMinimumProgressRatio = 0.5;
 
 Duration continuousPlaybackProgress({
   required Duration accumulated,
@@ -76,6 +81,34 @@ bool needsStartupFailover({
   continuousProgress: continuousProgress,
   threshold: playbackRouteHealthThreshold,
 );
+
+bool isPlaybackPositionReset({
+  required bool previouslyProgressed,
+  required Duration position,
+}) => previouslyProgressed && position < playbackResetPositionThreshold;
+
+Duration bufferingRecoveryDelay({required bool positionReset}) =>
+    positionReset ? playbackResetRecoveryDelay : playbackBufferRecoveryDelay;
+
+bool isFatalPlaybackLog(String text) {
+  final lower = text.toLowerCase();
+  return (lower.contains('avformat_open_input') && lower.contains('failed')) ||
+      lower.contains('error when loading first segment') ||
+      lower.contains('crypto: unable to open resource');
+}
+
+bool isPlaybackProgressTooSlow({
+  required Duration elapsed,
+  required Duration progress,
+  required bool playing,
+  required bool buffering,
+}) {
+  if (!playing || buffering || elapsed < playbackSlowProgressWindow) {
+    return false;
+  }
+  return progress.inMilliseconds <
+      elapsed.inMilliseconds * playbackMinimumProgressRatio;
+}
 
 // A short stable-playback window prevents background downloads from restarting
 // immediately after a buffer event and contending with foreground recovery.
@@ -230,6 +263,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription<Duration>? _durationSubscription;
   StreamSubscription<Duration>? _positionSubscription;
   StreamSubscription<bool>? _bufferingSubscription;
+  StreamSubscription<PlayerLog>? _logSubscription;
   List<VideoTrack> _videoTracks = [VideoTrack.auto()];
   String _selectedTrackId = 'auto';
   bool _preferenceApplied = false;
@@ -251,6 +285,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Duration _stablePrefetchPlayback = Duration.zero;
   Duration? _lastRouteHealthPosition;
   Duration _stableRoutePlayback = Duration.zero;
+  bool _previouslyProgressed = false;
+  DateTime? _routeProgressWindowStartedAt;
+  Duration? _routeProgressWindowStartPosition;
   Duration _watchdogPosition = Duration.zero;
   DateTime _watchdogAdvancedAt = DateTime.now();
   DateTime? _seekGraceUntil;
@@ -300,6 +337,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _observeRouteHealth(position);
     });
     _bufferingSubscription = _player.stream.buffering.listen(_handleBuffering);
+    _logSubscription = _player.stream.log.listen((event) {
+      if (isFatalPlaybackLog(event.text)) {
+        unawaited(_tryAutoSwitch('线路媒体打开失败'));
+      }
+    });
     _progressWatchdogTimer = Timer.periodic(
       const Duration(seconds: 1),
       (_) => _watchPlaybackProgress(),
@@ -313,12 +355,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _observeRouteHealth(Duration position) {
+    final previousPosition = _lastRouteHealthPosition;
+    final playing = _player.state.playing;
+    final buffering = _player.state.buffering;
+    if (!playing || buffering) {
+      _resetRouteProgressWindow();
+    } else if (_routeProgressWindowStartedAt == null ||
+        _routeProgressWindowStartPosition == null ||
+        isTimelinePositionDiscontinuity(previousPosition, position)) {
+      _routeProgressWindowStartedAt = DateTime.now();
+      _routeProgressWindowStartPosition = position;
+    }
+    if (position > Duration.zero && playing && !buffering) {
+      _previouslyProgressed = true;
+    }
     _stableRoutePlayback = continuousPlaybackProgress(
       accumulated: _stableRoutePlayback,
-      previousPosition: _lastRouteHealthPosition,
+      previousPosition: previousPosition,
       position: position,
-      playing: _player.state.playing,
-      buffering: _player.state.buffering,
+      playing: playing,
+      buffering: buffering,
     );
     _lastRouteHealthPosition = position;
     if (hasVerifiedPlaybackProgress(
@@ -377,20 +433,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
     final position = _player.state.position;
-    if (isTimelinePositionDiscontinuity(_lastPrefetchPosition, position)) {
+    final positionReset = isPlaybackPositionReset(
+      previouslyProgressed: _previouslyProgressed,
+      position: position,
+    );
+    if (isTimelinePositionDiscontinuity(_lastPrefetchPosition, position) &&
+        !positionReset) {
       _armSeekGrace();
+    }
+    if (positionReset) {
+      // A decoder/source reset after a real first frame is not a user seek;
+      // waiting through seek grace leaves the player stuck on a bad route.
+      _seekGraceUntil = null;
+      _stallTimer?.cancel();
+      _stallTimer = null;
     }
     _stableRoutePlayback = Duration.zero;
     _lastRouteHealthPosition = position;
     _stablePrefetchPlayback = Duration.zero;
     _lastPrefetchPosition = position;
     final seekGrace = _seekGraceUntil;
-    if (seekGrace != null && DateTime.now().isBefore(seekGrace)) return;
+    if (!positionReset &&
+        seekGrace != null &&
+        DateTime.now().isBefore(seekGrace)) {
+      return;
+    }
     if (_prefetchTimer != null || _prefetchStarted) {
       _stopTimelinePrefetch(clearSource: false);
     }
     if (!_opened || _stallTimer != null) return;
-    _stallTimer = Timer(const Duration(seconds: 10), _downgradeAfterStall);
+    _stallTimer = Timer(
+      bufferingRecoveryDelay(positionReset: positionReset),
+      _downgradeAfterStall,
+    );
   }
 
   void _resetProgressWatchdog([Duration? position]) {
@@ -398,9 +473,58 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _watchdogAdvancedAt = DateTime.now();
   }
 
+  void _resetRouteProgressWindow() {
+    _routeProgressWindowStartedAt = null;
+    _routeProgressWindowStartPosition = null;
+  }
+
   void _watchPlaybackProgress() {
     final position = _player.state.position;
     final now = DateTime.now();
+    if (position > Duration.zero &&
+        _player.state.playing &&
+        !_player.state.buffering) {
+      _previouslyProgressed = true;
+    }
+    final resetAfterPlayback = isPlaybackPositionReset(
+      previouslyProgressed: _previouslyProgressed,
+      position: position,
+    );
+    if (resetAfterPlayback &&
+        _opened &&
+        !_isNearEnd &&
+        _seekGraceUntil == null &&
+        _stallTimer == null) {
+      _stallTimer = Timer(playbackResetRecoveryDelay, () {
+        _stallTimer = null;
+        if (mounted &&
+            _opened &&
+            !_isNearEnd &&
+            isPlaybackPositionReset(
+              previouslyProgressed: _previouslyProgressed,
+              position: _player.state.position,
+            )) {
+          unawaited(_tryAutoSwitch('线路解码重置'));
+        }
+      });
+    }
+    final progressWindowStartedAt = _routeProgressWindowStartedAt;
+    final progressWindowStartPosition = _routeProgressWindowStartPosition;
+    if (progressWindowStartedAt != null &&
+        progressWindowStartPosition != null &&
+        position >= progressWindowStartPosition &&
+        isPlaybackProgressTooSlow(
+          elapsed: now.difference(progressWindowStartedAt),
+          progress: position - progressWindowStartPosition,
+          playing: _player.state.playing,
+          buffering: _player.state.buffering,
+        ) &&
+        !_isNearEnd) {
+      _resetRouteProgressWindow();
+      _resetProgressWatchdog(position);
+      unawaited(_tryAutoSwitch('线路播放速度过低'));
+      return;
+    }
     final advanced =
         position < _watchdogPosition ||
         position - _watchdogPosition >= const Duration(milliseconds: 500);
@@ -438,7 +562,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       buffering: _player.state.buffering,
     );
     _lastPrefetchPosition = position;
-    if (discontinuity) _armSeekGrace();
+    final positionReset = isPlaybackPositionReset(
+      previouslyProgressed: _previouslyProgressed,
+      position: position,
+    );
+    if (discontinuity && !positionReset) _armSeekGrace();
     _scheduleTimelinePrefetch();
   }
 
@@ -585,6 +713,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _stablePrefetchPlayback = Duration.zero;
     _lastRouteHealthPosition = null;
     _stableRoutePlayback = Duration.zero;
+    _previouslyProgressed = false;
+    _resetRouteProgressWindow();
     _resumeApplied = false;
     _resumeSeekInFlight = false;
     _seekGraceUntil = null;
@@ -862,6 +992,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _durationSubscription?.cancel();
     _positionSubscription?.cancel();
     _bufferingSubscription?.cancel();
+    _logSubscription?.cancel();
     // Capture the current position before disposing mpv. Calling dispose
     // first resets the state and used to overwrite history with 0 seconds.
     _saveProgress();

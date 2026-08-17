@@ -320,6 +320,85 @@ void main() {
     );
   });
 
+  test('首帧后位置归零不应等待跳播保护窗口', () {
+    expect(
+      isPlaybackPositionReset(
+        previouslyProgressed: true,
+        position: const Duration(milliseconds: 400),
+      ),
+      isTrue,
+    );
+    expect(
+      isPlaybackPositionReset(
+        previouslyProgressed: false,
+        position: Duration.zero,
+      ),
+      isFalse,
+    );
+    expect(
+      bufferingRecoveryDelay(positionReset: true),
+      playbackResetRecoveryDelay,
+    );
+    expect(
+      bufferingRecoveryDelay(positionReset: false),
+      playbackBufferRecoveryDelay,
+    );
+  });
+
+  test('未报缓冲但媒体推进显著慢于墙钟时判定线路过慢', () {
+    expect(
+      isPlaybackProgressTooSlow(
+        elapsed: playbackSlowProgressWindow,
+        progress: const Duration(seconds: 2),
+        playing: true,
+        buffering: false,
+      ),
+      isTrue,
+    );
+    expect(
+      isPlaybackProgressTooSlow(
+        elapsed: playbackSlowProgressWindow,
+        progress: const Duration(seconds: 4),
+        playing: true,
+        buffering: false,
+      ),
+      isFalse,
+    );
+    expect(
+      isPlaybackProgressTooSlow(
+        elapsed: playbackSlowProgressWindow,
+        progress: Duration.zero,
+        playing: true,
+        buffering: true,
+      ),
+      isFalse,
+    );
+  });
+
+  test('播放器首片和加密资源错误会立即触发换线', () {
+    expect(isFatalPlaybackLog('hls: Error when loading first segment'), isTrue);
+    expect(isFatalPlaybackLog('avformat_open_input() failed'), isTrue);
+    expect(isFatalPlaybackLog('crypto: Unable to open resource'), isTrue);
+    expect(isFatalPlaybackLog('audio decoder recovered'), isFalse);
+  });
+
+  test('首帧后媒体位置归零可被识别为解码重置', () {
+    expect(
+      isPlaybackPositionReset(
+        previouslyProgressed: true,
+        position: const Duration(milliseconds: 300),
+      ),
+      isTrue,
+    );
+    expect(
+      isPlaybackPositionReset(
+        previouslyProgressed: true,
+        position: const Duration(seconds: 2),
+      ),
+      isFalse,
+    );
+  });
+
   test('后台缓存只在连续稳定播放后启动', () {
     var stable = Duration.zero;
     Duration? previous;
