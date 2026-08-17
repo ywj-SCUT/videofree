@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, stat, unlink, readdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 
-const MAX_CACHE_SIZE = 2 * 1024 * 1024 * 1024; // 2 GB
+const MAX_CACHE_SIZE = 4 * 1024 * 1024 * 1024; // Keep a full 1080p episode or movie when space permits.
 export const MAX_CACHE_ENTRY_SIZE = 100 * 1024 * 1024; // 100 MB per segment
 const EVICT_RATIO = 0.9; // Evict down to 90% of max
 

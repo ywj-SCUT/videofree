@@ -165,4 +165,216 @@ void main() {
       );
     },
   );
+
+  test('自动换线按集号匹配同一集', () {
+    const line = PlayLine(
+      name: '备用线路',
+      episodes: [
+        Episode(name: '第 1 集', url: 'https://example.com/1.m3u8'),
+        Episode(name: '第 2 集', url: 'https://example.com/2.m3u8'),
+      ],
+    );
+
+    expect(matchingEpisodeIndex(line, '第02集', 0), 1);
+    expect(matchingEpisodeIndex(line, '特别篇', 1), 1);
+  });
+
+  test('首播失败会选择下一线路的同一集', () {
+    const lines = [
+      PlayLine(
+        name: '首选线路',
+        episodes: [
+          Episode(name: '第1集', url: 'https://a.example.com/1.m3u8'),
+          Episode(name: '第2集', url: 'https://a.example.com/2.m3u8'),
+        ],
+      ),
+      PlayLine(
+        name: '备用线路',
+        episodes: [
+          Episode(name: '第 1 集', url: 'https://b.example.com/1.m3u8'),
+          Episode(name: '第 2 集', url: 'https://b.example.com/2.m3u8'),
+        ],
+      ),
+    ];
+
+    final targets = failoverTargets(lines, 0, {0}, '第2集', 1);
+
+    expect(targets, hasLength(1));
+    expect(targets.single.lineIndex, 1);
+    expect(targets.single.episodeIndex, 1);
+  });
+
+  test('首播只有状态正常但未连续推进时仍触发换线', () {
+    expect(
+      needsStartupFailover(
+        duration: const Duration(hours: 1),
+        playing: true,
+        buffering: true,
+        continuousProgress: const Duration(seconds: 8),
+      ),
+      isTrue,
+    );
+    expect(
+      needsStartupFailover(
+        duration: const Duration(hours: 1),
+        playing: true,
+        buffering: false,
+        continuousProgress: const Duration(milliseconds: 4500),
+      ),
+      isTrue,
+    );
+    expect(
+      needsStartupFailover(
+        duration: const Duration(hours: 1),
+        playing: true,
+        buffering: false,
+        continuousProgress: playbackRouteHealthThreshold,
+      ),
+      isFalse,
+    );
+  });
+
+  test('换线就绪需要累计三秒真实单调推进', () {
+    var progress = Duration.zero;
+    Duration? previous;
+    for (var milliseconds = 0; milliseconds <= 3000; milliseconds += 500) {
+      final position = Duration(milliseconds: milliseconds);
+      progress = continuousPlaybackProgress(
+        accumulated: progress,
+        previousPosition: previous,
+        position: position,
+        playing: true,
+        buffering: false,
+      );
+      previous = position;
+    }
+
+    expect(progress, playbackReadyProgressThreshold);
+    expect(
+      hasVerifiedPlaybackProgress(
+        duration: const Duration(hours: 1),
+        playing: true,
+        buffering: false,
+        continuousProgress: progress,
+        threshold: playbackReadyProgressThreshold,
+      ),
+      isTrue,
+    );
+  });
+
+  test('缓冲、回退和跳播会重置连续推进窗口', () {
+    for (final position in [
+      const Duration(seconds: 5),
+      const Duration(seconds: 3),
+      const Duration(seconds: 20),
+    ]) {
+      expect(
+        continuousPlaybackProgress(
+          accumulated: const Duration(seconds: 4),
+          previousPosition: const Duration(seconds: 5),
+          position: position,
+          playing: true,
+          buffering: false,
+        ),
+        position == const Duration(seconds: 5)
+            ? const Duration(seconds: 4)
+            : Duration.zero,
+      );
+    }
+    expect(
+      continuousPlaybackProgress(
+        accumulated: const Duration(seconds: 4),
+        previousPosition: const Duration(seconds: 5),
+        position: const Duration(seconds: 6),
+        playing: true,
+        buffering: true,
+      ),
+      Duration.zero,
+    );
+  });
+
+  test('播放中未报缓冲但位置停滞时触发换线', () {
+    expect(
+      isPlaybackProgressStalled(
+        baselinePosition: const Duration(seconds: 5),
+        currentPosition: const Duration(milliseconds: 5200),
+        elapsed: playbackProgressStallThreshold,
+        opened: true,
+        playing: true,
+        buffering: false,
+        nearEnd: false,
+      ),
+      isTrue,
+    );
+    expect(
+      isPlaybackProgressStalled(
+        baselinePosition: const Duration(seconds: 5),
+        currentPosition: const Duration(seconds: 6),
+        elapsed: playbackProgressStallThreshold,
+        opened: true,
+        playing: true,
+        buffering: false,
+        nearEnd: false,
+      ),
+      isFalse,
+    );
+  });
+
+  test('后台缓存只在连续稳定播放后启动', () {
+    var stable = Duration.zero;
+    Duration? previous;
+    final thresholdSeconds = timelinePrefetchStabilityThreshold.inSeconds;
+    for (var second = 1; second <= thresholdSeconds; second++) {
+      final position = Duration(seconds: second);
+      stable = timelinePrefetchStableDuration(
+        accumulated: stable,
+        previousPosition: previous,
+        position: position,
+        playing: true,
+        buffering: false,
+      );
+      previous = position;
+    }
+
+    expect(stable, Duration(seconds: thresholdSeconds - 1));
+    expect(stable, lessThan(timelinePrefetchStabilityThreshold));
+    stable = timelinePrefetchStableDuration(
+      accumulated: stable,
+      previousPosition: previous,
+      position: Duration(seconds: thresholdSeconds + 1),
+      playing: true,
+      buffering: false,
+    );
+    expect(stable, timelinePrefetchStabilityThreshold);
+  });
+
+  test('跳播和缓冲会重置后台缓存稳定窗口', () {
+    expect(
+      isTimelinePositionDiscontinuity(
+        const Duration(minutes: 5),
+        const Duration(minutes: 10),
+      ),
+      isTrue,
+    );
+    expect(
+      timelinePrefetchStableDuration(
+        accumulated: timelinePrefetchStabilityThreshold,
+        previousPosition: const Duration(minutes: 5),
+        position: const Duration(minutes: 10),
+        playing: true,
+        buffering: false,
+      ),
+      Duration.zero,
+    );
+    expect(
+      timelinePrefetchStableDuration(
+        accumulated: const Duration(seconds: 12),
+        previousPosition: const Duration(seconds: 12),
+        position: const Duration(seconds: 13),
+        playing: true,
+        buffering: true,
+      ),
+      Duration.zero,
+    );
+  });
 }

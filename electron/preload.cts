@@ -1,11 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppSettings, CmsSource, DanmakuProvider, LibraryState, MediaCategory } from './types.js';
+import type { AppSettings, CmsSource, DanmakuProvider, LibraryState, MediaCategory, PlayLine } from './types.js';
 
 const api = {
   search: (query: string, category: MediaCategory, page = 1) => ipcRenderer.invoke('media:search', query, category, page),
   detail: (sourceId: string, id: string) => ipcRenderer.invoke('media:detail', sourceId, id),
   resolve: (item: unknown) => ipcRenderer.invoke('media:resolve', item),
   play: (sourceId: string, token: string) => ipcRenderer.invoke('media:play', sourceId, token),
+  routeLines: (lines: PlayLine[], episodeName: string, episodeIndex: number) => ipcRenderer.invoke('media:route-lines', lines, episodeName, episodeIndex),
+  reportRouteOutcome: (url: string, ok: boolean) => ipcRenderer.invoke('media:route-outcome', url, ok),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   saveSources: (sources: CmsSource[]) => ipcRenderer.invoke('settings:sources', sources),
   saveQuality: (quality: AppSettings['qualityPreference']) => ipcRenderer.invoke('settings:quality', quality),
@@ -21,7 +23,7 @@ const api = {
   openExternal: (url: string) => ipcRenderer.invoke('system:open-external', url),
   getCacheStats: () => ipcRenderer.invoke('cache:stats'),
   clearCache: () => ipcRenderer.invoke('cache:clear'),
-  startPrefetch: (url: string) => ipcRenderer.invoke('prefetch:start', url),
+  startPrefetch: (url: string, headers?: Record<string, string>, filterAds = false) => ipcRenderer.invoke('prefetch:start', url, headers, filterAds),
   stopPrefetch: () => ipcRenderer.invoke('prefetch:stop'),
   getPrefetchStatus: () => ipcRenderer.invoke('prefetch:status'),
   onPrefetchProgress: (callback: (progress: { total: number; cached: number; fetched: number; failed: number; bytes: number; done: boolean; status: string }) => void) => {

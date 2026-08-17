@@ -13,8 +13,18 @@ interface SegmentBlock {
 
 type PlaylistEntry = { raw: string } | { segment: SegmentBlock };
 
+interface SegmentGroup {
+  segmentIndexes: number[];
+  duration: number;
+  count: number;
+}
+
 const segmentTag = /^(#EXTINF|#EXT-X-(?:BYTERANGE|KEY|MAP|DISCONTINUITY|PROGRAM-DATE-TIME|DATERANGE|CUE-|SCTE35|ASSET)|#EXT-OATCLS-SCTE35)/i;
 const markerTag = /^(#EXT-X-(?:CUE-|SCTE35|ASSET)|#EXT-OATCLS-SCTE35)/i;
+const longContentDuration = 180;
+const shortIslandMinDuration = 5;
+const shortIslandMaxDuration = 90;
+const shortIslandMaxSegments = 20;
 
 function durationFromExtinf(line: string): number {
   const matched = line.match(/^#EXTINF:([\d.]+)/i);
@@ -70,8 +80,72 @@ function parseEntries(manifest: string): PlaylistEntry[] {
   return entries;
 }
 
+function segmentGroups(entries: PlaylistEntry[]): SegmentGroup[] {
+  const groups: SegmentGroup[] = [];
+  let current: SegmentGroup | null = null;
+  let segmentIndex = 0;
+  for (const entry of entries) {
+    if ('raw' in entry) continue;
+    const discontinuity = entry.segment.tags.some((tag) => /^#EXT-X-DISCONTINUITY\s*$/i.test(tag.trim()));
+    if (!current || (discontinuity && current.count > 0)) {
+      current = { segmentIndexes: [], duration: 0, count: 0 };
+      groups.push(current);
+    }
+    current.segmentIndexes.push(segmentIndex++);
+    current.duration += entry.segment.duration;
+    current.count++;
+  }
+  return groups;
+}
+
+function isLongContent(group: SegmentGroup | undefined): boolean {
+  return Boolean(group && group.duration >= longContentDuration);
+}
+
+function isShortIsland(group: SegmentGroup): boolean {
+  return group.duration >= shortIslandMinDuration
+    && group.duration <= shortIslandMaxDuration
+    && group.count <= shortIslandMaxSegments;
+}
+
+function similarIsland(left: SegmentGroup, right: SegmentGroup): boolean {
+  const durationTolerance = Math.max(2, Math.max(left.duration, right.duration) * 0.15);
+  return Math.abs(left.duration - right.duration) <= durationTolerance
+    && Math.abs(left.count - right.count) <= 1;
+}
+
+export function inferredAdSegmentIndexes(manifest: string): number[] {
+  const groups = segmentGroups(parseEntries(manifest));
+  if (!groups.some(isLongContent)) return [];
+
+  const candidates = groups
+    .map((group, index) => ({ group, index }))
+    .filter(({ group }) => isShortIsland(group));
+  const dropGroups = new Set<number>();
+
+  for (const { group, index } of candidates) {
+    const previousLong = isLongContent(groups[index - 1]);
+    const nextLong = isLongContent(groups[index + 1]);
+    if (previousLong && nextLong) {
+      dropGroups.add(index);
+      continue;
+    }
+    const boundary = index === 0 || index === groups.length - 1;
+    if (!boundary || (!previousLong && !nextLong)) continue;
+    const repeated = candidates.some(({ group: other, index: otherIndex }) => {
+      if (otherIndex === index) return false;
+      const otherAdjacentToLong = isLongContent(groups[otherIndex - 1]) || isLongContent(groups[otherIndex + 1]);
+      return otherAdjacentToLong && similarIsland(group, other);
+    });
+    if (repeated) dropGroups.add(index);
+  }
+
+  return groups.flatMap((group, index) => dropGroups.has(index) ? group.segmentIndexes : []);
+}
+
 export function filterHlsManifest(manifest: string): HlsFilterResult {
   const entries = parseEntries(manifest);
+  const inferredAds = new Set(inferredAdSegmentIndexes(manifest));
   const output: PlaylistEntry[] = [];
   let inCue = false;
   let timedAdRemaining = 0;
@@ -85,6 +159,7 @@ export function filterHlsManifest(manifest: string): HlsFilterResult {
   let activeMap: string | null = null;
   let emittedKey: string | null = null;
   let emittedMap: string | null = null;
+  let segmentIndex = 0;
 
   for (const entry of entries) {
     if ('raw' in entry) {
@@ -98,6 +173,7 @@ export function filterHlsManifest(manifest: string): HlsFilterResult {
       continue;
     }
     const block = entry.segment;
+    const inferredAd = inferredAds.has(segmentIndex++);
     for (const tag of block.tags) {
       const trimmed = tag.trim();
       if (/^#EXT-X-KEY:/i.test(trimmed)) activeKey = tag;
@@ -115,7 +191,7 @@ export function filterHlsManifest(manifest: string): HlsFilterResult {
       }
       if (markerTag.test(tag.trim())) removedMarkers++;
     }
-    const drop = inCue || timedAdRemaining > 0 || adUri(block.uri.trim());
+    const drop = inferredAd || inCue || timedAdRemaining > 0 || adUri(block.uri.trim());
     if (drop) {
       removedSegments++;
       removedDuration += block.duration;

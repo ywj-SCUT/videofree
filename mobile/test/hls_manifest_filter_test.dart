@@ -2,6 +2,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:videoget_mobile/services/hls_manifest_filter.dart';
 import 'package:videoget_mobile/services/playback_proxy.dart';
 
+String _group(String name, int count, {bool discontinuity = false}) {
+  final lines = <String>[if (discontinuity) '#EXT-X-DISCONTINUITY'];
+  for (var index = 0; index < count; index++) {
+    lines.addAll(['#EXTINF:6,', '$name-$index.ts']);
+  }
+  return lines.join('\n');
+}
+
+String _manifest(List<String> groups) => [
+  '#EXTM3U',
+  '#EXT-X-MEDIA-SEQUENCE:100',
+  ...groups,
+  '#EXT-X-ENDLIST',
+].join('\n');
+
 void main() {
   test('filters marked and named HLS ad segments without false positives', () {
     const manifest = '''#EXTM3U
@@ -77,5 +92,66 @@ main/first.m4s''';
       ),
       isFalse,
     );
+  });
+
+  test('A mode removes a short discontinuity island between long groups', () {
+    final manifest = _manifest([
+      _group('a-main-before', 30),
+      _group('a-short', 5, discontinuity: true),
+      _group('a-main-after', 30, discontinuity: true),
+    ]);
+
+    final result = filterHlsManifest(manifest);
+
+    expect(result.removedSegments, 5);
+    expect(result.removedDuration, 30);
+    expect(result.manifest, isNot(contains('a-short-0.ts')));
+    expect(result.manifest, contains('a-main-before-29.ts'));
+    expect(result.manifest, contains('a-main-after-0.ts'));
+  });
+
+  test('G mode removes repeated short islands at playlist boundaries', () {
+    final manifest = _manifest([
+      _group('g-edge-before', 4),
+      _group('g-main', 30, discontinuity: true),
+      _group('g-edge-after', 4, discontinuity: true),
+    ]);
+
+    final result = filterHlsManifest(manifest);
+
+    expect(result.removedSegments, 8);
+    expect(result.removedDuration, 48);
+    expect(result.manifest, contains('#EXT-X-MEDIA-SEQUENCE:104'));
+    expect(result.manifest, isNot(contains('g-edge-before-0.ts')));
+    expect(result.manifest, isNot(contains('g-edge-after-0.ts')));
+    expect(result.manifest, contains('g-main-0.ts'));
+  });
+
+  test('F mode keeps ordinary consecutive short discontinuity groups', () {
+    final manifest = _manifest([
+      _group('f-part-one', 10),
+      _group('f-part-two', 8, discontinuity: true),
+      _group('f-part-three', 12, discontinuity: true),
+    ]);
+
+    final result = filterHlsManifest(manifest);
+
+    expect(result.removedSegments, 0);
+    expect(result.manifest, contains('f-part-one-0.ts'));
+    expect(result.manifest, contains('f-part-two-0.ts'));
+    expect(result.manifest, contains('f-part-three-0.ts'));
+  });
+
+  test('C mode keeps a unique short boundary group beside long content', () {
+    final manifest = _manifest([
+      _group('c-main', 30),
+      _group('c-ending', 7, discontinuity: true),
+    ]);
+
+    final result = filterHlsManifest(manifest);
+
+    expect(result.removedSegments, 0);
+    expect(result.manifest, contains('c-main-0.ts'));
+    expect(result.manifest, contains('c-ending-0.ts'));
   });
 }

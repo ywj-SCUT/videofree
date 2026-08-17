@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 class HlsFilterResult {
   final String manifest;
   final int removedSegments;
@@ -18,6 +20,22 @@ class _SegmentBlock {
   final double duration;
 
   const _SegmentBlock(this.tags, this.uri, this.duration);
+}
+
+class _DiscontinuityGroup {
+  final int start;
+  final int end;
+  final double duration;
+
+  const _DiscontinuityGroup({
+    required this.start,
+    required this.end,
+    required this.duration,
+  });
+
+  int get segmentCount => end - start;
+  bool get isLong => duration >= 180;
+  bool get isCandidate => duration >= 5 && duration <= 90 && segmentCount <= 20;
 }
 
 final _segmentTag = RegExp(
@@ -50,6 +68,76 @@ bool _isAdUri(String value) {
   } catch (_) {
     return false;
   }
+}
+
+bool _startsDiscontinuityGroup(_SegmentBlock block) =>
+    block.tags.any((tag) => tag.trim().toUpperCase() == '#EXT-X-DISCONTINUITY');
+
+List<_DiscontinuityGroup> _discontinuityGroups(List<_SegmentBlock> segments) {
+  final groups = <_DiscontinuityGroup>[];
+  var start = 0;
+  var duration = 0.0;
+  for (var index = 0; index < segments.length; index++) {
+    if (index > start && _startsDiscontinuityGroup(segments[index])) {
+      groups.add(
+        _DiscontinuityGroup(start: start, end: index, duration: duration),
+      );
+      start = index;
+      duration = 0;
+    }
+    duration += segments[index].duration;
+  }
+  if (start < segments.length) {
+    groups.add(
+      _DiscontinuityGroup(
+        start: start,
+        end: segments.length,
+        duration: duration,
+      ),
+    );
+  }
+  return groups;
+}
+
+bool _similarIsland(_DiscontinuityGroup left, _DiscontinuityGroup right) {
+  final durationTolerance = math.max(
+    6.0,
+    math.max(left.duration, right.duration) * 0.25,
+  );
+  final countTolerance = math.max(
+    1,
+    (math.max(left.segmentCount, right.segmentCount) * 0.25).ceil(),
+  );
+  return (left.duration - right.duration).abs() <= durationTolerance &&
+      (left.segmentCount - right.segmentCount).abs() <= countTolerance;
+}
+
+Set<int> _inferDiscontinuityAdSegments(List<_SegmentBlock> segments) {
+  final groups = _discontinuityGroups(segments);
+  if (!groups.any((group) => group.isLong)) return const <int>{};
+  final candidates = groups.where((group) => group.isCandidate).toList();
+  final removed = <int>{};
+  for (var index = 0; index < groups.length; index++) {
+    final group = groups[index];
+    if (!group.isCandidate) continue;
+    final middle =
+        index > 0 &&
+        index < groups.length - 1 &&
+        groups[index - 1].isLong &&
+        groups[index + 1].isLong;
+    final boundary = index == 0 || index == groups.length - 1;
+    final adjacentLong =
+        boundary && (index == 0 ? groups[1].isLong : groups[index - 1].isLong);
+    final repeated = candidates.any(
+      (other) => !identical(other, group) && _similarIsland(group, other),
+    );
+    if (middle || (adjacentLong && repeated)) {
+      removed.addAll(
+        List<int>.generate(group.segmentCount, (i) => group.start + i),
+      );
+    }
+  }
+  return removed;
 }
 
 ({bool ad, bool external, double duration}) _adDateRange(String line) {
@@ -108,6 +196,10 @@ HlsFilterResult filterHlsManifest(String manifest) {
   }
   entries.addAll(tags);
 
+  final inferredAdSegments = _inferDiscontinuityAdSegments(
+    entries.whereType<_SegmentBlock>().toList(),
+  );
+
   final output = <Object>[];
   var inCue = false;
   var timedAdRemaining = 0.0;
@@ -121,6 +213,7 @@ HlsFilterResult filterHlsManifest(String manifest) {
   String? activeMap;
   String? emittedKey;
   String? emittedMap;
+  var segmentIndex = 0;
 
   for (final entry in entries) {
     if (entry is String) {
@@ -165,7 +258,13 @@ HlsFilterResult filterHlsManifest(String manifest) {
       if (_markerTag.hasMatch(tag.trim())) removedMarkers++;
     }
 
-    final drop = inCue || timedAdRemaining > 0 || _isAdUri(block.uri.trim());
+    final inferredDrop = inferredAdSegments.contains(segmentIndex);
+    segmentIndex++;
+    final drop =
+        inCue ||
+        timedAdRemaining > 0 ||
+        _isAdUri(block.uri.trim()) ||
+        inferredDrop;
     if (drop) {
       removedSegments++;
       removedDuration += block.duration;

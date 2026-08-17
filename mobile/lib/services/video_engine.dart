@@ -14,7 +14,12 @@ abstract interface class VideoEngine {
     List<CmsSource> sources,
   );
 
-  Future<MediaItem?> resolve(MediaItem item, List<CmsSource> sources);
+  Future<MediaItem?> resolve(
+    MediaItem item,
+    List<CmsSource> sources, {
+    String? preferredLineName,
+    String? episodeName,
+  });
 
   Future<PlaybackResolution> play(
     String sourceId,

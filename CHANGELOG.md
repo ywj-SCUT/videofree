@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.0.5] - 2026-08-18
+
+### Added
+
+- Desktop and Android now probe and rank up to eight playback lines by startup latency, measured throughput, recent reliability, and usable quality, preferring stable 1080p-or-lower routes with enough bandwidth reserve.
+- Added two managed CMS routes, corrected the existing line E endpoint, and automatically migrate built-in route definitions without overwriting user enable/search preferences.
+- HLS background prefetch now caches the opening segments and five-minute seek anchors first, then continues sequentially through the full episode while reusing the persistent media cache.
+- Android fullscreen playback provides left-side brightness swipes, right-side volume swipes, and hold-for-2x playback with speed restoration on release.
+
+### Fixed
+
+- Android tries playback traffic directly first, falls back to the configured system proxy within the shared timeout budget, and switches lines when first playback remains near zero even if the player does not report buffering.
+- Seeking between distant positions now reuses prefetched anchor segments instead of waiting for purely sequential cache fill.
+- Range responses are cached only after a matching `206 + Content-Range`; sources that ignore Range and return a full `200` response can no longer poison later seeks.
+- Desktop HLS prefetch selects the highest available variant at or below 1080p, and reports empty or failed downloads instead of counting them as completed cache entries.
+- Desktop and Android HLS filtering recognize marked ads and conservative discontinuity-based ad islands while preserving encryption keys, init maps, episode position, and line handoff state.
+- Desktop history persists native playback progress and opens cached playback lines immediately; Android manual line changes and automatic failover both keep the matching episode.
+
+### Build and signing
+
+- Android debug and release builds use the existing fixed signing identity so AVD tests and release upgrades remain data-compatible.
+- Flutter Pub, Gradle, and `media_kit` native artifacts use persistent caches; normal cleanup no longer forces all ABI libraries to download again.
+- Final APK certificate SHA-256 remains `f9a529fd73bb2193a805e6b2d09d39cf4f006d998aaa3e7b85f6a841391b5e1a`.
+
+### Verification
+
+- A networked Android API 35 AVD searched `怪奇物语第五季` in `3.246 s`, resolved seven playback lines in `10.292 s`, selected line B, and started a `4,288,083 ms` episode in `10.550 s`.
+- Playback advanced for `10.291 s` with zero buffering events; network seeks resumed in `1.753 s` at five minutes and `3.387 s` at ten minutes, both below the eight-second release limit.
+- The AVD's composed ten-minute video frame was visibly decoded with subtitles; its video crop contained `94.44%` non-dark pixels. Brightness reached `1.0`, volume reached `1.0`, hold playback reached `2.0x`, history persisted at `619.439 s`, and no `avformat_open_input` failure was observed.
+- Flutter analysis reported no issues; 78 mobile tests passed with one Android-only QuickJS test skipped on the host.
+- The final `0.0.5 (5)` APK contains `armeabi-v7a`, `arm64-v8a`, and `x86_64`, passed the fixed-signature check, and upgraded successfully on Android `user 0` with `adb install -r`.
+
 ## [0.0.4] - 2026-08-16
 
 ### Added

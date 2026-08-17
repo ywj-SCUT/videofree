@@ -21,3 +21,6 @@ Thumbs.db
 .signing/*.keystore
 .signing/*.jks
 .signing/*.p12
+
+# Local Android/Gradle native dependency cache. It is reproducible and not a release artifact.
+.android-build-cache/

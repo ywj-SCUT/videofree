@@ -1,14 +1,15 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { aggregateSearch, getDetail, importTvBox, resolveMedia, resolvePlayback, testSource } from './source-engine.js';
+import { aggregateSearch, getDetail, importTvBox, resolveMedia, resolvePlayback, routePlayLines, testSource } from './source-engine.js';
 import { aggregateDanmaku } from './danmaku-engine.js';
 import { fetchRemoteText } from './net-client.js';
 import { startProxyServer } from './proxy-server.js';
 import { Storage } from './storage.js';
 import { VideoCache } from './video-cache.js';
 import { PrefetchManager } from './prefetch-manager.js';
-import type { CmsSource, ImportResult, LibraryState, MediaCategory } from './types.js';
+import { reportRouteOutcome } from './route-engine.js';
+import type { CmsSource, ImportResult, LibraryState, MediaCategory, PlayLine } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isAutomationRun = process.argv.some((argument) => argument.startsWith('--remote-debugging-port='));
@@ -119,6 +120,11 @@ function registerIpc(): void {
     const settings = storage.getSettings(proxy?.port ?? 0);
     return resolvePlayback(settings.sources, sourceId, token);
   });
+  ipcMain.handle('media:route-lines', async (_event, lines: PlayLine[], episodeName: string, episodeIndex: number) => {
+    const settings = storage.getSettings(proxy?.port ?? 0);
+    return routePlayLines(settings.sources, lines, episodeName, episodeIndex, settings.proxyPort, settings.adFiltering);
+  });
+  ipcMain.handle('media:route-outcome', (_event, url: string, ok: boolean) => reportRouteOutcome(url, ok));
   ipcMain.handle('media:danmaku', async (_event, title: string, episodeName: string) => {
     const settings = storage.getSettings(proxy?.port ?? 0);
     return aggregateDanmaku(settings.danmakuProviders, title, episodeName);
@@ -143,9 +149,9 @@ function registerIpc(): void {
   ipcMain.on('window:minimize', () => mainWindow?.minimize());
   ipcMain.on('window:maximize', () => mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize());
   ipcMain.on('window:close', () => mainWindow?.close());
-  ipcMain.handle('prefetch:start', async (_event, url: string) => {
+  ipcMain.handle('prefetch:start', async (_event, url: string, headers?: Record<string, string>, filterAds = false) => {
     if (!prefetchManager || !proxy) return { total: 0, cached: 0, fetched: 0, failed: 0, bytes: 0, done: false, status: 'idle' };
-    void prefetchManager.start(url, proxy.port);
+    void prefetchManager.start(url, proxy.port, headers, filterAds);
     return prefetchManager.currentProgress;
   });
   ipcMain.handle('prefetch:stop', () => {

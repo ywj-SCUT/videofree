@@ -103,6 +103,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Device tests must remain upgrade-compatible with the release app.
+            signingConfig = signingConfigs.getByName("fixedRelease")
+        }
         release {
             signingConfig = signingConfigs.getByName("fixedRelease")
         }

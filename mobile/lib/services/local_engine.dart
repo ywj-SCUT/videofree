@@ -27,8 +27,17 @@ class LocalEngine implements VideoEngine {
   ) => _sourceEngine.getDetail(sources, sourceId, id);
 
   @override
-  Future<MediaItem?> resolve(MediaItem item, List<CmsSource> sources) =>
-      _sourceEngine.resolveMedia(sources, item);
+  Future<MediaItem?> resolve(
+    MediaItem item,
+    List<CmsSource> sources, {
+    String? preferredLineName,
+    String? episodeName,
+  }) => _sourceEngine.resolveMedia(
+    sources,
+    item,
+    preferredLineName: preferredLineName,
+    episodeName: episodeName,
+  );
 
   @override
   Future<PlaybackResolution> play(

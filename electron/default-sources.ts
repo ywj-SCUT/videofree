@@ -38,12 +38,22 @@ export const DEFAULT_SOURCES: CmsSource[] = [
   },
   {
     id: 'builtin-line-e', name: '默认线路 E', type: 'cms',
-    api: 'https://api.wujinapi.me/api.php/provide/vod/',
+    api: 'https://api.wujinapi.com/api.php/provide/vod/',
     enabled: true, searchable: true,
   },
   {
     id: 'builtin-line-f', name: '默认线路 F', type: 'cms',
     api: 'https://cj.rycjapi.com/api.php/provide/vod/',
+    enabled: true, searchable: true,
+  },
+  {
+    id: 'builtin-line-g', name: '默认线路 G', type: 'cms',
+    api: 'https://cj.ffzyapi.com/api.php/provide/vod/',
+    enabled: true, searchable: true,
+  },
+  {
+    id: 'builtin-line-h', name: '默认线路 H', type: 'cms',
+    api: 'https://bfzyapi.com/api.php/provide/vod/',
     enabled: true, searchable: true,
   },
 ];

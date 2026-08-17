@@ -8,7 +8,7 @@ import {
   MonitorPlay, Pause, Play, Plus, Search, Settings, Sparkles, Star, Trash2, Upload, Volume2,
   VolumeX, X,
 } from 'lucide-react';
-import type { AppSettings, CmsSource, DanmakuProvider, HistoryItem, LibraryState, MediaCategory, MediaItem, SearchResponse } from './types';
+import type { AppSettings, CmsSource, DanmakuProvider, HistoryItem, LibraryState, MediaCategory, MediaItem, PlayLine, SearchResponse } from './types';
 
 type View = 'discover' | 'search' | 'shorts' | 'favorites' | 'history' | 'settings';
 
@@ -63,7 +63,7 @@ function preferredLevel(levels: Hls['levels'], preference: QualityPreference): n
   }).index;
 }
 
-function attachHls(video: HTMLVideoElement, sourceUrl: string, art: Artplayer, preference: QualityPreference, onQuality?: (label: string) => void, lowLatencyMode = false): void {
+function attachHls(video: HTMLVideoElement, sourceUrl: string, art: Artplayer, preference: QualityPreference, onQuality?: (label: string) => void, onTerminalError?: () => void, lowLatencyMode = false): void {
   if (!Hls.isSupported()) {
     if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = sourceUrl;
     return;
@@ -180,8 +180,9 @@ function attachHls(video: HTMLVideoElement, sourceUrl: string, art: Artplayer, p
       art.notice.show = '播放异常，正在恢复';
       return;
     }
-    art.notice.show = '当前线路持续加载失败，请切换线路重试';
+    art.notice.show = '当前线路持续加载失败，正在切换备用线路';
     hls.stopLoad();
+    onTerminalError?.();
   });
   art.on('destroy', () => hls.destroy());
 }
@@ -198,6 +199,39 @@ function streamUrl(settings: AppSettings, source: string, headers?: Record<strin
   const requestHeaders = headers && Object.keys(headers).length ? `&headers=${encodeURIComponent(JSON.stringify(headers))}` : '';
   if (settings.proxyBaseUrl) return `${settings.proxyBaseUrl}?url=${encodeURIComponent(source)}${adFilter}${requestHeaders}`;
   return settings.proxyPort > 0 ? `http://127.0.0.1:${settings.proxyPort}/stream?url=${encodeURIComponent(source)}${adFilter}${requestHeaders}` : source;
+}
+
+function episodeOrdinal(name: string): number | null {
+  const value = Number(name.match(/\d+/)?.[0]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function sameEpisode(left: string, right: string): boolean {
+  const normalizedLeft = left.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  const normalizedRight = right.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  if (normalizedLeft === normalizedRight) return true;
+  const leftOrdinal = episodeOrdinal(left);
+  return leftOrdinal !== null && leftOrdinal === episodeOrdinal(right);
+}
+
+function matchingEpisodeIndex(line: PlayLine | undefined, episodeName: string, fallbackIndex: number): number {
+  if (!line?.episodes.length) return 0;
+  const matched = line.episodes.findIndex((episode) => sameEpisode(episode.name, episodeName));
+  return matched >= 0 ? matched : Math.min(Math.max(0, fallbackIndex), line.episodes.length - 1);
+}
+
+async function withinPlaybackDeadline<T>(task: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer = 0;
+  try {
+    return await Promise.race([
+      task,
+      new Promise<T>((_resolve, reject) => {
+        timer = window.setTimeout(() => reject(new Error('播放地址解析超时')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function App() {
@@ -334,7 +368,7 @@ function App() {
     setLoading(true);
     try {
       const detail = await window.lumen.resolve(item);
-      setSelected(detail ?? item);
+      setSelected(detail ?? historyItem ?? item);
     } finally {
       setLoading(false);
     }
@@ -724,7 +758,7 @@ function SettingsView({ settings, onSettings }: { settings: AppSettings; onSetti
       <div className="add-source"><input value={danmakuName} onChange={(event) => setDanmakuName(event.target.value)} placeholder="来源名称" /><input value={danmakuApi} onChange={(event) => setDanmakuApi(event.target.value)} placeholder="DandanPlay / LogVar 兼容 API 地址" /><button className="primary-button" onClick={addDanmakuProvider}><Plus size={16} />添加</button></div>
       <div className="source-list">{settings.danmakuProviders.map((provider) => <div className={provider.type === 'bilibili' ? 'source-row builtin' : 'source-row'} key={provider.id}><button className={provider.enabled ? 'toggle on' : 'toggle'} onClick={() => void saveDanmakuProviders(settings.danmakuProviders.map((entry) => entry.id === provider.id ? { ...entry, enabled: !entry.enabled } : entry))}><span /></button><div><strong>{provider.name}</strong><small>{provider.type === 'bilibili' ? '内置番剧匹配与弹幕 XML' : provider.api}</small></div>{provider.type !== 'bilibili' && <button className="icon-button danger" aria-label="删除弹幕来源" title="删除弹幕来源" onClick={() => void saveDanmakuProviders(settings.danmakuProviders.filter((entry) => entry.id !== provider.id))}><Trash2 size={16} /></button>}</div>)}</div>
     </section>
-    <section className="settings-section about"><div className="settings-heading"><div><h2>关于 VideoGET</h2><p>本地优先的桌面聚合播放器 · 版本 0.0.4</p></div></div><div className="about-grid"><span><MonitorPlay size={18} />Electron 桌面端</span><span><Star size={18} />ArtPlayer + HLS.js</span><span><Check size={18} />数据保存在本机</span></div></section>
+    <section className="settings-section about"><div className="settings-heading"><div><h2>关于 VideoGET</h2><p>本地优先的桌面聚合播放器 · 版本 0.0.5</p></div></div><div className="about-grid"><span><MonitorPlay size={18} />Electron 桌面端</span><span><Star size={18} />ArtPlayer + HLS.js</span><span><Check size={18} />数据保存在本机</span></div></section>
   </div>;
 }
 
@@ -740,13 +774,14 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle: string })
 function EmptyState({ icon: Icon, title, text, action }: { icon: typeof Search; title: string; text: string; action?: React.ReactNode }) { return <div className="empty-state"><span><Icon size={26} /></span><h2>{title}</h2><p>{text}</p>{action}</div>; }
 
 function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, onProgress }: { item: MediaItem; settings: AppSettings; isFavorite: boolean; resume: HistoryItem | null; onClose: () => void; onFavorite: () => void; onProgress: (item: MediaItem, progress: number, duration: number, lineName: string, episodeName: string) => void }) {
-  const lines = item.playLines ?? [];
+  const sourceLines = item.playLines ?? [];
   const resumePosition = useMemo(() => {
     if (!resume) return { lineIndex: 0, episodeIndex: 0 };
-    const matchedLine = Math.max(0, lines.findIndex((line) => line.name === resume.lineName && line.episodes.some((episode) => episode.name === resume.episodeName)));
-    const matchedEpisode = Math.max(0, lines[matchedLine]?.episodes.findIndex((episode) => episode.name === resume.episodeName) ?? 0);
+    const matchedLine = Math.max(0, sourceLines.findIndex((line) => line.name === resume.lineName && line.episodes.some((episode) => sameEpisode(episode.name, resume.episodeName ?? ''))));
+    const matchedEpisode = matchingEpisodeIndex(sourceLines[matchedLine], resume.episodeName ?? '', 0);
     return { lineIndex: matchedLine, episodeIndex: matchedEpisode };
   }, [item.sourceId, item.id, resume?.watchedAt]);
+  const [lines, setLines] = useState(sourceLines);
   const [lineIndex, setLineIndex] = useState(resumePosition.lineIndex);
   const [episodeIndex, setEpisodeIndex] = useState(resumePosition.episodeIndex);
   const container = useRef<HTMLDivElement>(null);
@@ -758,7 +793,32 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
   const [playing, setPlaying] = useState(false);
   const [speedLabel, setSpeedLabel] = useState('1x');
   const speedRef = useRef(1);
+  const playingRef = useRef(false);
+  const selectionTouchedRef = useRef(false);
+  const handoffPositionRef = useRef(0);
+  const failedLineNamesRef = useRef(new Set<string>());
   const current = lines[lineIndex]?.episodes[episodeIndex];
+
+  useEffect(() => { playingRef.current = playing; }, [playing]);
+
+  useEffect(() => {
+    if (sourceLines.length < 2) return;
+    let active = true;
+    failedLineNamesRef.current.clear();
+    const hintLine = sourceLines[resumePosition.lineIndex] ?? sourceLines[0];
+    const hintEpisode = hintLine?.episodes[resumePosition.episodeIndex];
+    if (!window.lumen.routeLines) return;
+    void window.lumen.routeLines(sourceLines, resume?.episodeName ?? hintEpisode?.name ?? '', resumePosition.episodeIndex)
+      .then((routed) => {
+        if (!active || playingRef.current || selectionTouchedRef.current || routed.length < 2) return;
+        const episodeName = resume?.episodeName ?? hintEpisode?.name ?? '';
+        setLines(routed);
+        setLineIndex(0);
+        setEpisodeIndex(matchingEpisodeIndex(routed[0], episodeName, resumePosition.episodeIndex));
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [item.sourceId, item.id, resume?.watchedAt]);
 
   useEffect(() => {
     if (!playing || !container.current || !current) return;
@@ -771,18 +831,67 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
     let detachVideoListeners: (() => void) | null = null;
     let lastSaved = 0;
     let resumeApplied = false;
+    let stallTimer = 0;
+    let prefetchTimer = 0;
+    let successReported = false;
+    let failureReported = false;
+    let prefetchStarted = false;
+    let failoverInProgress = false;
+    let routeUrl = '';
+    let pendingSeekTarget = 0;
+    const stopBackgroundPrefetch = () => {
+      window.clearTimeout(prefetchTimer);
+      prefetchTimer = 0;
+      if (!prefetchStarted) return;
+      prefetchStarted = false;
+      void window.lumen.stopPrefetch?.();
+    };
+    const scheduleBackgroundPrefetch = (originalUrl: string, headers?: Record<string, string>) => {
+      if (prefetchStarted || prefetchTimer || !/m3u8(?:$|\?)/i.test(originalUrl)) return;
+      prefetchTimer = window.setTimeout(() => {
+        prefetchTimer = 0;
+        if (!active || !instance || instance.video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
+        prefetchStarted = true;
+        void window.lumen.startPrefetch?.(originalUrl, headers, settings.adFiltering);
+      }, 2_000);
+    };
     const saveProgress = () => {
       if (instance && instance.currentTime > 0 && Number.isFinite(instance.currentTime)) {
         onProgress(item, instance.currentTime, instance.duration || 0, lines[lineIndex]?.name ?? '', current.name);
       }
     };
+    const switchToNextLine = () => {
+      if (!active || failoverInProgress) return;
+      failoverInProgress = true;
+      window.clearTimeout(stallTimer);
+      const currentLineName = lines[lineIndex]?.name ?? String(lineIndex);
+      failedLineNamesRef.current.add(currentLineName);
+      if (!failureReported && routeUrl) {
+        failureReported = true;
+        void window.lumen.reportRouteOutcome?.(routeUrl, false);
+      }
+      const position = instance?.currentTime ?? 0;
+      if (Number.isFinite(position) && position > 0.5) handoffPositionRef.current = position;
+      for (let offset = 1; offset <= lines.length; offset++) {
+        const nextLineIndex = (lineIndex + offset) % lines.length;
+        const nextLine = lines[nextLineIndex];
+        if (!nextLine || failedLineNamesRef.current.has(nextLine.name)) continue;
+        setQualityLabel('正在切换备用线路');
+        setLineIndex(nextLineIndex);
+        setEpisodeIndex(matchingEpisodeIndex(nextLine, current.name, episodeIndex));
+        return;
+      }
+      setQualityLabel('所有线路暂时不可用');
+      instance?.pause();
+    };
     void (async () => {
       try {
         const resolved = current.url.startsWith('videoget-rule:') || current.url.startsWith('videoget-short:')
-          ? await window.lumen.play(current.sourceId ?? item.sourceId, current.url)
+          ? await withinPlaybackDeadline(window.lumen.play(current.sourceId ?? item.sourceId, current.url), 8_000)
           : { url: current.url, headers: current.headers };
         if (!active || !container.current) return;
         const originalUrl = resolved.url;
+        routeUrl = originalUrl;
         const url = streamUrl(settings, originalUrl, resolved.headers);
         instance = new Artplayer({
           container: container.current,
@@ -824,7 +933,7 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
           type: /m3u8(?:$|\?)/i.test(originalUrl) ? 'm3u8' : undefined,
           customType: {
             m3u8: (video, sourceUrl, art) => {
-              attachHls(video, sourceUrl, art, settings.qualityPreference, setQualityLabel);
+              attachHls(video, sourceUrl, art, settings.qualityPreference, setQualityLabel, switchToNextLine);
             },
           },
         });
@@ -851,7 +960,30 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
         instance.playbackRate = currentSpeed;
         setSpeedLabel(speedLabelStr);
         const video = instance.video;
+        const handlePlaying = () => {
+          window.clearTimeout(stallTimer);
+          failoverInProgress = false;
+          if (!successReported) {
+            successReported = true;
+            void window.lumen.reportRouteOutcome?.(originalUrl, true);
+          }
+          scheduleBackgroundPrefetch(originalUrl, resolved.headers);
+        };
+        const handleWaiting = () => {
+          window.clearTimeout(stallTimer);
+          stopBackgroundPrefetch();
+          const stalledAt = video.currentTime;
+          stallTimer = window.setTimeout(() => {
+            if (active && video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA && Math.abs(video.currentTime - stalledAt) < 0.5) switchToNextLine();
+          }, 12_000);
+        };
+        const handleSeeking = () => stopBackgroundPrefetch();
+        const handleSeeked = () => scheduleBackgroundPrefetch(originalUrl, resolved.headers);
         const handleTimeUpdate = () => {
+          if (pendingSeekTarget > 0 && Math.abs(video.currentTime - pendingSeekTarget) <= 3) {
+            pendingSeekTarget = 0;
+            handoffPositionRef.current = 0;
+          }
           if (Date.now() - lastSaved > 5000) {
             lastSaved = Date.now();
             saveProgress();
@@ -863,20 +995,34 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
         };
         const handleLoadedMetadata = () => {
           if (!instance) return;
-          const isResumeEpisode = resume?.episodeName === current.name && (!resume.lineName || resume.lineName === lines[lineIndex]?.name);
-          if (!resumeApplied && isResumeEpisode && resume.progress > 0 && (!resume.duration || resume.progress < resume.duration - 15)) {
+          const handoffPosition = handoffPositionRef.current;
+          const isResumeEpisode = Boolean(resume?.episodeName && sameEpisode(resume.episodeName, current.name));
+          const targetPosition = handoffPosition > 0 ? handoffPosition : isResumeEpisode ? resume?.progress ?? 0 : 0;
+          const targetDuration = handoffPosition > 0 ? 0 : resume?.duration ?? 0;
+          if (!resumeApplied && targetPosition > 0 && (!targetDuration || targetPosition < targetDuration - 15)) {
             resumeApplied = true;
-            instance.currentTime = Math.min(resume.progress, Math.max(0, instance.duration - 5));
-            setResumedAt(instance.currentTime);
+            pendingSeekTarget = Math.min(targetPosition, Math.max(0, instance.duration - 5));
+            instance.currentTime = pendingSeekTarget;
+            setResumedAt(pendingSeekTarget);
           }
           if (!/m3u8(?:$|\?)/i.test(originalUrl) && instance.video.videoHeight > 0) setQualityLabel(`${instance.video.videoHeight}P`);
         };
         video.addEventListener('timeupdate', handleTimeUpdate);
+        video.addEventListener('playing', handlePlaying);
+        video.addEventListener('waiting', handleWaiting);
+        video.addEventListener('seeking', handleSeeking);
+        video.addEventListener('seeked', handleSeeked);
+        video.addEventListener('error', switchToNextLine);
         video.addEventListener('pause', saveProgress);
         video.addEventListener('ended', handleEnded);
         video.addEventListener('loadedmetadata', handleLoadedMetadata);
         detachVideoListeners = () => {
           video.removeEventListener('timeupdate', handleTimeUpdate);
+          video.removeEventListener('playing', handlePlaying);
+          video.removeEventListener('waiting', handleWaiting);
+          video.removeEventListener('seeking', handleSeeking);
+          video.removeEventListener('seeked', handleSeeked);
+          video.removeEventListener('error', switchToNextLine);
           video.removeEventListener('pause', saveProgress);
           video.removeEventListener('ended', handleEnded);
           video.removeEventListener('loadedmetadata', handleLoadedMetadata);
@@ -884,10 +1030,19 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
         if (video.readyState >= HTMLMediaElement.HAVE_METADATA) handleLoadedMetadata();
         player.current = instance;
       } catch {
-        if (active) setQualityLabel('规则解析失败');
+        if (active) switchToNextLine();
       }
     })();
-    return () => { active = false; detachVideoListeners?.(); saveProgress(); instance?.destroy(false); player.current = null; };
+    return () => {
+      active = false;
+      window.clearTimeout(stallTimer);
+      window.clearTimeout(prefetchTimer);
+      detachVideoListeners?.();
+      saveProgress();
+      void window.lumen.stopPrefetch?.();
+      instance?.destroy(false);
+      player.current = null;
+    };
   }, [current?.url, current?.sourceId, lineIndex, episodeIndex, settings.proxyPort, settings.proxyBaseUrl, settings.adFiltering, settings.qualityPreference, playing, onProgress]);
 
   const toggleDanmaku = () => {
@@ -897,13 +1052,37 @@ function PlayerSheet({ item, settings, isFavorite, resume, onClose, onFavorite, 
     setDanmakuVisible(!danmakuVisible);
   };
 
+  const selectLine = (index: number) => {
+    selectionTouchedRef.current = true;
+    failedLineNamesRef.current.clear();
+    const episodeName = current?.name ?? '';
+    setLineIndex(index);
+    setEpisodeIndex(matchingEpisodeIndex(lines[index], episodeName, episodeIndex));
+  };
+
+  const selectEpisode = (index: number) => {
+    selectionTouchedRef.current = true;
+    failedLineNamesRef.current.clear();
+    setEpisodeIndex(index);
+  };
+
+  const beginPlayback = () => {
+    playingRef.current = true;
+    setPlaying(true);
+  };
+
+  const showDetails = () => {
+    playingRef.current = false;
+    setPlaying(false);
+  };
+
   return <div className="player-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="player-sheet detail-sheet">
     {!current ? <><button className="detail-close icon-button" aria-label="关闭详情" title="关闭详情" onClick={onClose}><X size={20} /></button><EmptyState icon={Film} title="暂无可播放线路" text="当前来源没有返回有效播放地址，请尝试其他来源。" /></> : !playing ? <div className="detail-surface" style={{ backgroundImage: `url("${imageUrl(item.backdrop ?? item.poster, settings.proxyPort, 1800, 1000)}")` }}>
       <div className="detail-surface-shade" />
       <header className="detail-topbar"><button className="icon-button" aria-label="关闭详情" title="关闭详情" onClick={onClose}><X size={20} /></button></header>
-      <div className="detail-main"><div className="detail-poster-large"><img src={imageUrl(item.poster, settings.proxyPort, 540, 810)} alt={item.title} /></div><div className="detail-copy-large"><span className="detail-kicker">{item.sourceName} · {item.category === 'series' ? '剧集' : item.category === 'movie' ? '电影' : item.category === 'anime' ? '动漫' : '精选内容'}</span><h2>{item.title}</h2><div className="detail-meta">{[item.year, item.area, item.quality, item.remarks].filter(Boolean).map((value) => <span key={value}>{value}</span>)}</div><p>{item.summary || '选择播放线路，开始观看这部作品。'}</p>{(item.actors || item.director) && <div className="detail-credits">{item.actors && <span><strong>主演</strong>{item.actors}</span>}{item.director && <span><strong>导演</strong>{item.director}</span>}</div>}<div className="detail-actions"><button className="primary-button detail-start" onClick={() => setPlaying(true)}><Play size={18} fill="currentColor" />{resume ? '继续播放' : '立即播放'}</button><button className={isFavorite ? 'detail-favorite active' : 'detail-favorite'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={20} fill={isFavorite ? 'currentColor' : 'none'} /></button></div></div></div>
-      <div className="detail-selection"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div>
-    </div> : <><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title} · {current.name}</h2></div><div><small className="player-status">{qualityLabel}</small><small className="player-status">{speedLabel}</small><small className="player-status danmaku-status">{danmakuLabel}</small><button className={danmakuVisible ? 'icon-button active' : 'icon-button'} aria-label={danmakuVisible ? '关闭弹幕' : '开启弹幕'} title={danmakuVisible ? '关闭弹幕' : '开启弹幕'} onClick={toggleDanmaku}>{danmakuVisible ? <Captions size={18} /> : <CaptionsOff size={18} />}</button><button className={isFavorite ? 'icon-button active' : 'icon-button'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" aria-label="返回详情" title="返回详情" onClick={() => setPlaying(false)}><X size={20} /></button></div></header><div className={item.category === 'short' || item.category === 'ai-short' ? 'player-stage vertical-mode' : 'player-stage'} ref={container} />{resumedAt > 0 && <div className="resume-notice"><Clock3 size={14} />已从 {formatTime(resumedAt)} 继续播放</div>}<div className="player-controls"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => { setLineIndex(index); setEpisodeIndex(0); }}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => setEpisodeIndex(index)}>{episode.name}</button>)}</div></div></>}
+      <div className="detail-main"><div className="detail-poster-large"><img src={imageUrl(item.poster, settings.proxyPort, 540, 810)} alt={item.title} /></div><div className="detail-copy-large"><span className="detail-kicker">{item.sourceName} · {item.category === 'series' ? '剧集' : item.category === 'movie' ? '电影' : item.category === 'anime' ? '动漫' : '精选内容'}</span><h2>{item.title}</h2><div className="detail-meta">{[item.year, item.area, item.quality, item.remarks].filter(Boolean).map((value) => <span key={value}>{value}</span>)}</div><p>{item.summary || '选择播放线路，开始观看这部作品。'}</p>{(item.actors || item.director) && <div className="detail-credits">{item.actors && <span><strong>主演</strong>{item.actors}</span>}{item.director && <span><strong>导演</strong>{item.director}</span>}</div>}<div className="detail-actions"><button className="primary-button detail-start" onClick={beginPlayback}><Play size={18} fill="currentColor" />{resume ? '继续播放' : '立即播放'}</button><button className={isFavorite ? 'detail-favorite active' : 'detail-favorite'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={20} fill={isFavorite ? 'currentColor' : 'none'} /></button></div></div></div>
+      <div className="detail-selection"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => selectLine(index)}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => selectEpisode(index)}>{episode.name}</button>)}</div></div>
+    </div> : <><header className="player-header"><div><span>{item.sourceName}</span><h2>{item.title} · {current.name}</h2></div><div><small className="player-status">{qualityLabel}</small><small className="player-status">{speedLabel}</small><small className="player-status danmaku-status">{danmakuLabel}</small><button className={danmakuVisible ? 'icon-button active' : 'icon-button'} aria-label={danmakuVisible ? '关闭弹幕' : '开启弹幕'} title={danmakuVisible ? '关闭弹幕' : '开启弹幕'} onClick={toggleDanmaku}>{danmakuVisible ? <Captions size={18} /> : <CaptionsOff size={18} />}</button><button className={isFavorite ? 'icon-button active' : 'icon-button'} aria-label={isFavorite ? '取消收藏' : '收藏'} title={isFavorite ? '取消收藏' : '收藏'} onClick={onFavorite}><Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} /></button><button className="icon-button" aria-label="返回详情" title="返回详情" onClick={showDetails}><X size={20} /></button></div></header><div className={item.category === 'short' || item.category === 'ai-short' ? 'player-stage vertical-mode' : 'player-stage'} ref={container} />{resumedAt > 0 && <div className="resume-notice"><Clock3 size={14} />已从 {formatTime(resumedAt)} 继续播放</div>}<div className="player-controls"><div className="line-tabs">{lines.map((line, index) => <button key={line.name} className={lineIndex === index ? 'active' : ''} onClick={() => selectLine(index)}>{line.name}</button>)}</div><div className="episode-grid">{lines[lineIndex]?.episodes.map((episode, index) => <button key={`${episode.name}-${index}`} className={episodeIndex === index ? 'active' : ''} onClick={() => selectEpisode(index)}>{episode.name}</button>)}</div></div></>}
   </section></div>;
 }
 

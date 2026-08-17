@@ -49,6 +49,8 @@ export interface LumenApi {
   detail(sourceId: string, id: string): Promise<MediaItem | null>;
   resolve(item: MediaItem): Promise<MediaItem | null>;
   play(sourceId: string, token: string): Promise<PlaybackResolution>;
+  routeLines?(lines: PlayLine[], episodeName: string, episodeIndex: number): Promise<PlayLine[]>;
+  reportRouteOutcome?(url: string, ok: boolean): Promise<void>;
   getSettings(): Promise<AppSettings>;
   saveSources(sources: CmsSource[]): Promise<AppSettings>;
   saveQuality(quality: AppSettings['qualityPreference']): Promise<AppSettings>;
@@ -62,6 +64,8 @@ export interface LumenApi {
   getLibrary(): Promise<LibraryState>;
   saveLibrary(library: LibraryState): Promise<LibraryState>;
   openExternal(url: string): Promise<unknown>;
+  startPrefetch?(url: string, headers?: Record<string, string>, filterAds?: boolean): Promise<unknown>;
+  stopPrefetch?(): Promise<unknown>;
   minimize(): void; maximize(): void; close(): void;
   onMaximizeChange(callback: (maximized: boolean) => void): () => void;
 }

@@ -38,7 +38,7 @@ class _DetailScreenState extends State<DetailScreen> {
     if (widget.item.playLines?.isNotEmpty == true) {
       _detail = widget.item;
       _loading = false;
-      _applyResumeSelection(widget.item.playLines!);
+      _applyResumeSelection(widget.item.playLines!, preferLine: true);
       unawaited(_refreshDetail());
     } else {
       _loadDetail();
@@ -47,9 +47,12 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Future<void> _refreshDetail() async {
     try {
+      final resume = widget.appState.getResume(widget.item) ?? widget.resume;
       final result = await widget.appState.engine.resolve(
         widget.item,
         widget.appState.sources,
+        preferredLineName: resume?.lineName,
+        episodeName: resume?.episodeName,
       );
       if (!mounted || result == null || result.playLines?.isNotEmpty != true) {
         return;
@@ -61,15 +64,36 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  void _applyResumeSelection(List<PlayLine> lines) {
+  void _applyResumeSelection(List<PlayLine> lines, {bool preferLine = false}) {
     final resume = widget.appState.getResume(widget.item) ?? widget.resume;
     if (resume == null || lines.isEmpty) return;
-    final matchLine = lines.indexWhere((line) => line.name == resume.lineName);
-    if (matchLine >= 0) _lineIndex = matchLine;
+    _lineIndex = 0;
+    if (preferLine) {
+      final matchLine = lines.indexWhere(
+        (line) => line.name == resume.lineName,
+      );
+      if (matchLine >= 0) _lineIndex = matchLine;
+    }
     final matchEpisode = lines[_lineIndex].episodes.indexWhere(
       (episode) => episode.name == resume.episodeName,
     );
-    if (matchEpisode >= 0) _episodeIndex = matchEpisode;
+    if (matchEpisode >= 0) {
+      _episodeIndex = matchEpisode;
+      return;
+    }
+    final episodeNumber = int.tryParse(
+      RegExp(r'\d+').firstMatch(resume.episodeName ?? '')?.group(0) ?? '',
+    );
+    final numberedMatch = episodeNumber == null
+        ? -1
+        : lines[_lineIndex].episodes.indexWhere(
+            (episode) =>
+                int.tryParse(
+                  RegExp(r'\d+').firstMatch(episode.name)?.group(0) ?? '',
+                ) ==
+                episodeNumber,
+          );
+    _episodeIndex = numberedMatch >= 0 ? numberedMatch : 0;
   }
 
   Future<void> _loadDetail() async {
@@ -78,9 +102,12 @@ class _DetailScreenState extends State<DetailScreen> {
       _error = null;
     });
     try {
+      final resume = widget.appState.getResume(widget.item) ?? widget.resume;
       final result = await widget.appState.engine.resolve(
         widget.item,
         widget.appState.sources,
+        preferredLineName: resume?.lineName,
+        episodeName: resume?.episodeName,
       );
       if (!mounted) return;
       if (result != null && result.playLines?.isNotEmpty == true) {

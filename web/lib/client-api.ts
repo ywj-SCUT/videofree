@@ -7,6 +7,7 @@ import type {
 
 const SETTINGS_KEY = 'videoget.settings.v1';
 const PLAYBACK_TUNING_KEY = 'videoget.playback-tuning.v2';
+const MANAGED_SOURCES_KEY = 'videoget.managed-sources.v3';
 const LIBRARY_KEY = 'videoget.library.v1';
 const defaultSources: CmsSource[] = [
   { id: 'builtin-short-tikhub-tiktok', name: 'TikTok 推荐', type: 'short-api', api: 'https://api.tikhub.io', provider: 'tikhub-tiktok', region: 'US', enabled: false, searchable: true },
@@ -14,6 +15,12 @@ const defaultSources: CmsSource[] = [
   { id: 'builtin-short-youtube', name: 'YouTube Shorts', type: 'short-api', api: 'https://api.tikhub.io', provider: 'tikhub-youtube', region: 'CN', enabled: false, searchable: true },
   { id: 'builtin-line-a', name: '默认线路 A', type: 'cms', api: 'https://caiji.moduapi.cc/api.php/provide/vod/', enabled: true, searchable: true },
   { id: 'builtin-line-b', name: '默认线路 B', type: 'cms', api: 'https://jszyapi.com/api.php/provide/vod/', enabled: true, searchable: true },
+  { id: 'builtin-line-c', name: '默认线路 C', type: 'cms', api: 'https://cj.lziapi.com/api.php/provide/vod/', enabled: true, searchable: true },
+  { id: 'builtin-line-d', name: '默认线路 D', type: 'cms', api: 'https://api.ukuapi.com/api.php/provide/vod/', enabled: true, searchable: true },
+  { id: 'builtin-line-e', name: '默认线路 E', type: 'cms', api: 'https://api.wujinapi.com/api.php/provide/vod/', enabled: true, searchable: true },
+  { id: 'builtin-line-f', name: '默认线路 F', type: 'cms', api: 'https://cj.rycjapi.com/api.php/provide/vod/', enabled: true, searchable: true },
+  { id: 'builtin-line-g', name: '默认线路 G', type: 'cms', api: 'https://cj.ffzyapi.com/api.php/provide/vod/', enabled: true, searchable: true },
+  { id: 'builtin-line-h', name: '默认线路 H', type: 'cms', api: 'https://bfzyapi.com/api.php/provide/vod/', enabled: true, searchable: true },
 ];
 const defaultSettings: AppSettings = {
   sources: defaultSources,
@@ -37,10 +44,18 @@ function readValue<T>(key: string, fallback: T): T {
 function settings(): AppSettings {
   const value = readValue(SETTINGS_KEY, defaultSettings);
   const needsPlaybackMigration = window.localStorage.getItem(PLAYBACK_TUNING_KEY) !== '1';
+  const needsManagedSourcesMigration = window.localStorage.getItem(MANAGED_SOURCES_KEY) !== '1';
   const persisted = new Map((value.sources ?? []).map((source) => [source.id, source]));
   const managed = defaultSources
     .filter((source) => source.id.startsWith('builtin-'))
-    .map((source) => ({ ...source, ...persisted.get(source.id) }));
+    .map((source) => {
+      const saved = persisted.get(source.id);
+      return {
+        ...source,
+        enabled: saved?.enabled ?? source.enabled,
+        searchable: saved?.searchable ?? source.searchable,
+      };
+    });
   const custom = (value.sources ?? []).filter((source) => !source.id.startsWith('builtin-'));
   const next: AppSettings = {
     sources: [...managed, ...custom],
@@ -52,9 +67,10 @@ function settings(): AppSettings {
     proxyPort: 0,
     proxyBaseUrl: '/api/proxy',
   };
-  if (needsPlaybackMigration) {
+  if (needsPlaybackMigration || needsManagedSourcesMigration) {
     window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
-    window.localStorage.setItem(PLAYBACK_TUNING_KEY, '1');
+    if (needsPlaybackMigration) window.localStorage.setItem(PLAYBACK_TUNING_KEY, '1');
+    if (needsManagedSourcesMigration) window.localStorage.setItem(MANAGED_SOURCES_KEY, '1');
   }
   return next;
 }
@@ -103,6 +119,8 @@ export function installWebApi(): void {
     play(sourceId: string, token: string) {
       return request('/api/play', { sourceId, token, sources: settings().sources });
     },
+    async routeLines(lines) { return lines; },
+    async reportRouteOutcome() {},
     async getSettings() { return settings(); },
     async saveSources(sources: CmsSource[]) { return saveSettings({ ...settings(), sources }); },
     async saveQuality(quality: AppSettings['qualityPreference']) { return saveSettings({ ...settings(), qualityPreference: quality }); },
@@ -129,6 +147,8 @@ export function installWebApi(): void {
       return library;
     },
     async openExternal(url: string) { window.open(url, '_blank', 'noopener,noreferrer'); },
+    async startPrefetch() {},
+    async stopPrefetch() {},
     minimize() {},
     maximize() {},
     close() {},

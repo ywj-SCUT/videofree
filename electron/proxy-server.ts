@@ -134,7 +134,7 @@ async function fetchStream(target: string, headers: Record<string, string>, disp
   const preference = routePreferences.get(origin);
   if (preference && preference.expiresAt > Date.now()) {
     try {
-      const proxied = await fetchHeaders(target, headers, dispatcher, 15_000, signal);
+      const proxied = await fetchHeaders(target, headers, dispatcher, 8_000, signal);
       if (proxied.ok || proxied.status === 206) return proxied;
       await proxied.body?.cancel();
     } catch (error) {
@@ -143,16 +143,16 @@ async function fetchStream(target: string, headers: Record<string, string>, disp
     routePreferences.delete(origin);
   }
   try {
-    const direct = await fetchHeaders(target, headers, undefined, 4_500, signal);
+    const direct = await fetchHeaders(target, headers, undefined, 1_500, signal);
     if (direct.ok || direct.status === 206) return direct;
     await direct.body?.cancel();
   } catch (error) {
     if (signal.aborted) throw error;
     // Fall through to the configured local proxy.
   }
-  const proxied = await fetchHeaders(target, headers, dispatcher, 15_000, signal);
+  const proxied = await fetchHeaders(target, headers, dispatcher, 8_000, signal);
   if (proxied.ok || proxied.status === 206) {
-    routePreferences.set(origin, { route: 'proxy', expiresAt: Date.now() + 5 * 60_000 });
+    routePreferences.set(origin, { route: 'proxy', expiresAt: Date.now() + 10 * 60_000 });
   }
   return proxied;
 }
@@ -172,7 +172,7 @@ function cacheIdentity(target: string, headers: Record<string, string>, range?: 
     .sort(([left], [right]) => left.toLowerCase().localeCompare(right.toLowerCase()))
     .map(([name, value]) => `${name.toLowerCase()}:${value}`)
     .join('\n');
-  return headerKey || range ? `${target}\n${headerKey}\nrange:${range ?? ''}` : target;
+  return headerKey || range ? `${target}\n${headerKey}\nrange-v2:${range ?? ''}` : target;
 }
 
 function cachedRangeHeader(range: string, size: number): string | null {
@@ -181,6 +181,20 @@ function cachedRangeHeader(range: string, size: number): string | null {
   const start = Number(match[1]);
   const requestedEnd = match[2] ? Number(match[2]) : start + size - 1;
   return `bytes ${start}-${Math.min(requestedEnd, start + size - 1)}/*`;
+}
+
+function isValidPartialResponse(range: string, status: number, contentRange: string | null): boolean {
+  if (status !== 206 || !contentRange) return false;
+  const requested = /^bytes=(\d+)-(\d*)$/i.exec(range);
+  const received = /^bytes\s+(\d+)-(\d+)\/(?:\d+|\*)$/i.exec(contentRange.trim());
+  if (!requested || !received) return false;
+  const requestedStart = Number(requested[1]);
+  const requestedEnd = requested[2] ? Number(requested[2]) : null;
+  const receivedStart = Number(received[1]);
+  const receivedEnd = Number(received[2]);
+  return receivedStart === requestedStart
+    && receivedEnd >= receivedStart
+    && (requestedEnd === null || receivedEnd <= requestedEnd);
 }
 
 export async function startProxyServer(cacheDirectory: string, videoCache?: VideoCache): Promise<{ port: number; close: () => Promise<void> }> {
@@ -260,14 +274,15 @@ export async function startProxyServer(cacheDirectory: string, videoCache?: Vide
         return;
       }
       try {
-        if (videoCache.has(target)) {
-          response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ cached: true, size: 0 }));
-          return;
-        }
         const customHeaders = playbackHeaders(incoming.searchParams.get('headers'));
         const headers: Record<string, string> = { ...defaultHeaders, ...customHeaders };
         const referer = incoming.searchParams.get('referer');
         if (referer) headers.Referer = referer;
+        const cacheKey = cacheIdentity(target, headers);
+        if (videoCache.has(cacheKey)) {
+          response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ cached: true, size: 0 }));
+          return;
+        }
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 30_000);
         try {
@@ -281,7 +296,7 @@ export async function startProxyServer(cacheDirectory: string, videoCache?: Vide
           if (isCacheableSegment(target, contentType)) {
             const buffer = Buffer.from(await upstream.arrayBuffer());
             if (buffer.length > 0 && buffer.length <= 100 * 1024 * 1024) {
-              await videoCache.put(target, buffer);
+              await videoCache.put(cacheKey, buffer);
               response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ cached: false, size: buffer.length }));
               return;
             }
@@ -363,9 +378,12 @@ export async function startProxyServer(cacheDirectory: string, videoCache?: Vide
 
       // --- Cache write-path for cacheable segments ---
       const declaredLength = Number(upstream.headers.get('content-length') ?? 0);
+      const cacheableStatus = range
+        ? isValidPartialResponse(range, upstream.status, upstream.headers.get('content-range'))
+        : upstream.status === 200;
       let cacheable = Boolean(
         videoCache
-        && (upstream.status === 200 || upstream.status === 206)
+        && cacheableStatus
         && isCacheableSegment(target, contentType)
         && (!declaredLength || declaredLength <= MAX_CACHE_ENTRY_SIZE),
       );

@@ -9,6 +9,7 @@ class StorageService {
   static const _historyKey = 'videoget.history';
   static const _qualityKey = 'videoget.quality';
   static const _playbackTuningKey = 'videoget.playback-tuning.v2';
+  static const _managedSourcesKey = 'videoget.managed-sources.v3';
 
   static const _defaultSources = [
     {
@@ -77,7 +78,7 @@ class StorageService {
       'id': 'builtin-line-e',
       'name': '默认线路 E',
       'type': 'cms',
-      'api': 'https://api.wujinapi.me/api.php/provide/vod/',
+      'api': 'https://api.wujinapi.com/api.php/provide/vod/',
       'enabled': true,
       'searchable': true,
     },
@@ -86,6 +87,22 @@ class StorageService {
       'name': '默认线路 F',
       'type': 'cms',
       'api': 'https://cj.rycjapi.com/api.php/provide/vod/',
+      'enabled': true,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-line-g',
+      'name': '默认线路 G',
+      'type': 'cms',
+      'api': 'https://cj.ffzyapi.com/api.php/provide/vod/',
+      'enabled': true,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-line-h',
+      'name': '默认线路 H',
+      'type': 'cms',
+      'api': 'https://bfzyapi.com/api.php/provide/vod/',
       'enabled': true,
       'searchable': true,
     },
@@ -104,13 +121,28 @@ class StorageService {
     final byId = {for (final source in persisted) source.id: source.toJson()};
     final managed = _defaultSources
         .map(
-          (source) => CmsSource.fromJson({...source, ...?byId[source['id']]}),
+          (source) {
+            final saved = byId[source['id']];
+            return CmsSource.fromJson({
+              ...source,
+              if (saved != null) 'enabled': saved['enabled'],
+              if (saved != null) 'searchable': saved['searchable'],
+            });
+          },
         )
         .toList();
     final custom = persisted
         .where((source) => !source.id.startsWith('builtin-'))
         .toList();
-    return [...managed, ...custom];
+    final result = [...managed, ...custom];
+    if (prefs.getBool(_managedSourcesKey) != true) {
+      await prefs.setString(
+        _sourcesKey,
+        jsonEncode(result.map((source) => source.toJson()).toList()),
+      );
+      await prefs.setBool(_managedSourcesKey, true);
+    }
+    return result;
   }
 
   Future<void> saveSources(List<CmsSource> sources) async {

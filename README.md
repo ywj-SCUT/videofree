@@ -6,14 +6,14 @@ VideoGET 是一个本地优先的 Windows 与 Android 影视聚合、解析和�
 
 ## 下载与版本
 
-当前版本：`v0.0.3`
+当前版本：`v0.0.5`
 
 | 平台 | 版本 | 系统要求 | 下载 |
 | --- | --- | --- | --- |
-| Windows x64 | `0.0.3` | Windows 10/11 64 位 | [下载安装包](https://github.com/ywj-SCUT/videofree/releases/download/v0.0.3/VideoGET-Setup-0.0.3-x64.exe) |
-| Android | `0.0.3+3` | Android 5.0（API 21）及以上 | [下载 APK](https://github.com/ywj-SCUT/videofree/releases/download/v0.0.3/VideoGET-Android-v0.0.3.apk) |
+| Windows x64 | `0.0.5` | Windows 10/11 64 位 | [下载安装包](https://github.com/ywj-SCUT/videofree/releases/download/v0.0.5/VideoGET-Setup-0.0.5-x64.exe) |
+| Android | `0.0.5+5` | Android 7.0（API 24）及以上 | [下载 APK](https://github.com/ywj-SCUT/videofree/releases/download/v0.0.5/VideoGET-Android-v0.0.5.apk) |
 
-版本说明和附件见 [GitHub Releases](https://github.com/ywj-SCUT/videofree/releases/tag/v0.0.3)。仓库中的本地构建产物位于 `release` 目录，该目录不纳入 Git 版本管理。
+版本说明和附件见 [GitHub Releases](https://github.com/ywj-SCUT/videofree/releases/tag/v0.0.5)。仓库中的本地构建产物位于 `release` 目录，该目录不纳入 Git 版本管理。
 
 ## 主要功能
 
@@ -33,13 +33,13 @@ VideoGET 是一个本地优先的 Windows 与 Android 影视聚合、解析和�
 - 自动保存当前剧集、线路和播放进度，可从观看记录继续播放。
 - Android 播放器在固定画质持续缓冲时会尝试降到较低画质或自动画质。
 
-### v0.0.4 长视频播放与本地缓存
+### v0.0.5 长视频播放与本地缓存
 
 Windows 端：
 
-- 播放器按需获取 HLS 分片，不再并发预取完整视频，避免后台下载与前台播放争抢带宽。
-- 视频分片和匹配的 Range 响应写入 Electron 用户数据目录中的 `video-cache`，磁盘缓存上限为 2 GB。
-- 超过上限时按最近最少使用顺序清理到约 1.8 GB，避免缓存持续增长。
+- HLS 后台预取先缓存开头和每 5 分钟跳播锚点，再以单并发顺序回填整集，避免长期争抢前台播放带宽。
+- 视频分片和经过校验的 Range/206 响应写入 Electron 用户数据目录中的 `video-cache`，磁盘缓存上限为 4 GB。
+- 超过上限时按最近最少使用顺序清理到约 3.6 GB，避免缓存持续增长。
 - 支持常见 TS、M4S、AAC、MP4、字幕和密钥分片，单个缓存对象上限为 100 MB。
 - HLS.js 默认保留 60 秒前向缓冲，允许扩展到 120 秒，内存缓冲上限为 128 MB，并增加分片重试和网络超时容忍度。
 - 已经缓存的分片会直接从磁盘读取；未命中时边播放边下载，并在完成后异步落盘。
@@ -47,7 +47,7 @@ Windows 端：
 
 Android 端：
 
-- 远程 HLS 通过应用内本地代理播放，媒体分片持久保存在应用文件目录，缓存上限为 1 GB。
+- 远程 HLS 通过应用内本地代理播放，媒体分片持久保存在应用文件目录，缓存上限为 4 GB。
 - mpv 使用 96 MB 播放缓冲、180 秒缓存和 90 秒前向预读，降低移动设备内存压力。
 - 全屏时左半屏上下滑动调节系统亮度，右半屏上下滑动调节媒体音量，长按画面临时以 2 倍速播放。
 - 广告过滤会删除播放列表中可识别的广告标记和分片，并保留加密密钥及初始化片段状态。
@@ -71,7 +71,7 @@ Android 端：
 
 ### Windows
 
-1. 下载并运行 `VideoGET-Setup-0.0.4-x64.exe`。
+1. 下载并运行 `VideoGET-Setup-0.0.5-x64.exe`。
 2. 按安装向导完成安装，然后启动 VideoGET。
 3. 在“片库”浏览内容，或使用搜索功能查找片名。
 4. 点击海报进入详情页，选择线路和剧集后开始播放。
@@ -82,13 +82,13 @@ Android 端：
 
 ### Android
 
-在手机上允许当前文件管理器或浏览器“安装未知应用”，然后打开下载的 `VideoGET-Android-v0.0.4.apk` 完成安装。升级已有版本时直接安装新 APK，不要先卸载旧版本；只有新 APK 与已安装版本使用相同应用 ID 和签名时，Android 才能保留应用数据并覆盖更新。
+在手机上允许当前文件管理器或浏览器“安装未知应用”，然后打开下载的 `VideoGET-Android-v0.0.5.apk` 完成安装。升级已有版本时直接安装新 APK，不要先卸载旧版本；只有新 APK 与已安装版本使用相同应用 ID 和签名时，Android 才能保留应用数据并覆盖更新。
 
 也可以通过已连接的电脑覆盖安装：
 
 ```powershell
 adb devices
-adb install --no-streaming -r .\release\VideoGET-Android-v0.0.3.apk
+adb install --no-streaming -r --user 0 .\release\VideoGET-Android-v0.0.5.apk
 ```
 
 安装后：
@@ -237,7 +237,7 @@ npm run verify:android-signature
 
 Android 通过应用 ID 和签名证书共同确认更新关系。同一应用的后续版本必须持续使用同一把签名密钥；正常发布不会每个版本更换签名。密钥变化后，系统会把新 APK 视为签名不匹配，不能直接覆盖已安装版本。
 
-VideoGET Android 发布签名已固定为手机现有 `v0.0.3` 使用的证书：
+VideoGET Android 发布签名固定使用同一证书，`v0.0.5` 可直接覆盖安装并保留原数据：
 
 ```text
 SHA-256: f9a529fd73bb2193a805e6b2d09d39cf4f006d998aaa3e7b85f6a841391b5e1a

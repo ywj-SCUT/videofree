@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../models/models.dart';
 import 'net_service.dart';
+import 'route_engine.dart';
 import 'short_video_engine.dart';
 import 'spider_engine.dart';
 
@@ -16,13 +17,21 @@ class SourceEngine {
     NetService? net,
     SpiderRuleExecutor? spider,
     ShortVideoEngine? shorts,
+    RouteEngine? routes,
+    this.detailTimeout = const Duration(seconds: 3),
+    this.searchTimeout = const Duration(seconds: 4),
   }) : _net = net ?? NetService(),
        _spider = spider ?? FlutterJsSpiderEngine(net: net),
-       _shorts = shorts ?? ShortVideoEngine(net: net);
+       _shorts = shorts ?? ShortVideoEngine(net: net) {
+    _routes = routes ?? RouteEngine(net: _net);
+  }
 
   final NetService _net;
   final SpiderRuleExecutor _spider;
   final ShortVideoEngine _shorts;
+  late final RouteEngine _routes;
+  final Duration detailTimeout;
+  final Duration searchTimeout;
 
   static const _requestHeaders = <String, String>{
     'User-Agent':
@@ -283,7 +292,11 @@ class SourceEngine {
               hasMore: result.hasMore,
             );
           }
-          final result = await searchCms(source, query, currentPage);
+          final result = await searchCms(
+            source,
+            query,
+            currentPage,
+          ).timeout(_searchTimeoutFor(source));
           return _SearchAttempt(
             source: source,
             items: result.items,
@@ -354,8 +367,39 @@ class SourceEngine {
         alternatives: alternatives,
       );
     }
-    return groups.values.toList();
+    final results = groups.values.toList();
+    results.sort(
+      (left, right) => _searchResultReliability(
+        right,
+      ).compareTo(_searchResultReliability(left)),
+    );
+    return results;
   }
+
+  double _searchResultReliability(MediaItem item) {
+    final variants = item.alternatives?.isNotEmpty == true
+        ? item.alternatives!
+        : [_variantOf(item)];
+    var score = 0.0;
+    for (final variant in variants) {
+      final prior = RouteEngine.validatedStabilityPrior(variant.sourceId);
+      if (prior > score) score = prior;
+    }
+    return score;
+  }
+
+  // Built-in routes are fetched concurrently during detail resolution. Give
+  // each one the same budget so a slower, higher-throughput route can still
+  // reach the live ranking pass instead of being silently excluded.
+  Duration _searchTimeoutFor(CmsSource source) =>
+      source.id.startsWith('builtin-line-')
+      ? const Duration(seconds: 8)
+      : searchTimeout;
+
+  Duration _detailTimeoutFor(String sourceId) =>
+      sourceId.startsWith('builtin-line-')
+      ? const Duration(seconds: 8)
+      : detailTimeout;
 
   Future<MediaItem?> getDetail(
     List<CmsSource> sources,
@@ -374,24 +418,29 @@ class SourceEngine {
 
   Future<MediaItem?> resolveMedia(
     List<CmsSource> sources,
-    MediaItem item,
-  ) async {
+    MediaItem item, {
+    String? preferredLineName,
+    String? episodeName,
+  }) async {
     final variants = item.alternatives?.isNotEmpty == true
         ? item.alternatives!
         : [_variantOf(item)];
-    final details = <MediaItem>[];
-    await Future.wait(
+    final details = (await Future.wait(
       variants.map((variant) async {
         try {
-          final detail = await getDetail(sources, variant.sourceId, variant.id);
-          if (detail != null) details.add(detail);
+          return await getDetail(
+            sources,
+            variant.sourceId,
+            variant.id,
+          ).timeout(_detailTimeoutFor(variant.sourceId));
         } catch (_) {
           // 单个来源失败不应阻止其他线路返回。
+          return null;
         }
       }),
-    );
+    )).whereType<MediaItem>().toList();
     if (details.isEmpty) return null;
-    final playLines = details
+    final unsortedLines = details
         .expand(
           (detail) => (detail.playLines ?? const <PlayLine>[]).map(
             (line) => PlayLine(
@@ -410,6 +459,11 @@ class SourceEngine {
           ),
         )
         .toList();
+    final playLines = await _routes.rankLines(
+      unsortedLines,
+      preferredLineName: preferredLineName,
+      episodeName: episodeName,
+    );
     details.sort((left, right) => _richness(right).compareTo(_richness(left)));
     final richest = details.first;
     return _copyItem(

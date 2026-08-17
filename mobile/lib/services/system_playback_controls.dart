@@ -55,4 +55,12 @@ class SystemPlaybackControls {
       return null;
     }
   }
+
+  static Future<bool> isEmulator() async {
+    try {
+      return await _channel.invokeMethod<bool>('isEmulator') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

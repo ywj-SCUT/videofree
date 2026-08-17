@@ -6,13 +6,16 @@ import type { AppSettings, LibraryState } from './types.js';
 
 interface PersistedData {
   playbackTuningVersion: number;
+  managedSourcesVersion: number;
   settings: Omit<AppSettings, 'proxyPort'>;
   library: LibraryState;
 }
 
 const playbackTuningVersion = 2;
+const managedSourcesVersion = 3;
 const defaults: PersistedData = {
   playbackTuningVersion,
+  managedSourcesVersion,
   settings: {
     sources: DEFAULT_SOURCES,
     danmakuProviders: [{ id: 'bilibili', name: 'Bilibili 弹幕', type: 'bilibili', enabled: true }],
@@ -44,20 +47,24 @@ export class Storage {
     }
     if (parsed) {
       const needsPlaybackMigration = (parsed.playbackTuningVersion ?? 0) < playbackTuningVersion;
+      const needsManagedSourcesMigration = (parsed.managedSourcesVersion ?? 0) < managedSourcesVersion;
       const persistedSources = parsed.settings?.sources ?? [];
-      const enabledById = new Map(persistedSources.map((source) => [source.id, source.enabled]));
       const persistedById = new Map(persistedSources.map((source) => [source.id, source]));
       const customSources = persistedSources.filter((source) => !source.id.startsWith('builtin-'));
-      const managedSources = DEFAULT_SOURCES.map((source) => ({
-        ...source,
-        ...persistedById.get(source.id),
-        enabled: enabledById.get(source.id) ?? source.enabled,
-      }));
+      const managedSources = DEFAULT_SOURCES.map((source) => {
+        const persisted = persistedById.get(source.id);
+        return {
+          ...source,
+          enabled: persisted?.enabled ?? source.enabled,
+          searchable: persisted?.searchable ?? source.searchable,
+        };
+      });
       const sources = persistedSources.length
         ? [...managedSources, ...customSources]
         : structuredClone(DEFAULT_SOURCES);
       this.data = {
         playbackTuningVersion,
+        managedSourcesVersion,
         settings: {
           sources,
           danmakuProviders: parsed.settings?.danmakuProviders ?? structuredClone(defaults.settings.danmakuProviders),
@@ -68,7 +75,9 @@ export class Storage {
         },
         library: { ...defaults.library, ...parsed.library },
       };
-      if (needsPlaybackMigration || restoredFromBackup) await this.flush(!restoredFromBackup);
+      if (needsPlaybackMigration || needsManagedSourcesMigration || restoredFromBackup) {
+        await this.flush(!restoredFromBackup);
+      }
     } else {
       await this.flush(false);
     }

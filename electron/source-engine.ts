@@ -1,5 +1,6 @@
 import { fetchRemoteText } from './net-client.js';
 import { OPEN_CATALOG } from './open-catalog.js';
+import { episodeForLine, rankRouteCandidates, type RouteCandidate } from './route-engine.js';
 import { detailRule, resolveRulePlayback, searchRule, testRule } from './rule-engine.js';
 import { resolveShortPlayback, searchShortSource, testShortSource } from './short-video-engine.js';
 import type { CmsSource, MediaCategory, MediaItem, MediaVariant, PlaybackResolution, PlayLine, SearchResponse } from './types.js';
@@ -88,7 +89,7 @@ interface SourceSearchPage {
 async function searchCms(source: CmsSource, query: string, page: number): Promise<SourceSearchPage> {
   if (!source.api) return { items: [], hasMore: false };
   const url = cmsUrl(source.api, { ac: 'videolist', wd: query, pg: String(page) });
-  const data = await fetchJson(url, source) as {
+  const data = await fetchJson(url, source, 4_000) as {
     list?: Array<Record<string, unknown>>;
     data?: Array<Record<string, unknown>>;
     page?: number | string;
@@ -208,10 +209,32 @@ export async function resolvePlayback(sources: CmsSource[], sourceId: string, to
   return resolveRulePlayback(source, token);
 }
 
+async function waitWithinBudget(task: Promise<unknown>, budgetMs: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(finish, budgetMs);
+    void task.then(finish, finish);
+  });
+}
+
 export async function resolveMedia(sources: CmsSource[], item: MediaItem): Promise<MediaItem | null> {
   const variants = item.alternatives?.length ? item.alternatives : [variantOf(item)];
-  const settled = await Promise.allSettled(variants.map((variant) => getDetail(sources, variant.sourceId, variant.id)));
-  const details = settled.flatMap((result) => result.status === 'fulfilled' && result.value ? [result.value] : []);
+  const details: MediaItem[] = [];
+  const pending = variants.map(async (variant) => {
+    try {
+      const detail = await getDetail(sources, variant.sourceId, variant.id);
+      if (detail) details.push(detail);
+    } catch {
+      // A single unhealthy source must not block details from healthy sources.
+    }
+  });
+  await waitWithinBudget(Promise.all(pending), 5_000);
   if (!details.length) return null;
   const playLines = details.flatMap((detail) => (detail.playLines ?? []).map((line) => ({
     ...line,
@@ -236,6 +259,44 @@ export async function resolveMedia(sources: CmsSource[], item: MediaItem): Promi
     alternatives: variants,
     playLines,
   };
+}
+
+function playbackWithTimeout(sources: CmsSource[], sourceId: string, token: string, timeoutMs: number): Promise<PlaybackResolution> {
+  return new Promise<PlaybackResolution>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('线路解析超时')), timeoutMs);
+    void resolvePlayback(sources, sourceId, token).then(
+      (value) => { clearTimeout(timeout); resolve(value); },
+      (error) => { clearTimeout(timeout); reject(error); },
+    );
+  });
+}
+
+export async function routePlayLines(
+  sources: CmsSource[],
+  lines: PlayLine[],
+  episodeName: string,
+  episodeIndex: number,
+  proxyPort: number,
+  adFiltering: boolean,
+): Promise<PlayLine[]> {
+  if (lines.length < 2) return lines;
+  const candidates = (await Promise.all(lines.map(async (line, index): Promise<RouteCandidate | null> => {
+    const episode = episodeForLine(line, episodeName, episodeIndex);
+    if (!episode) return null;
+    try {
+      const resolved = /^https?:\/\//i.test(episode.url)
+        ? { url: episode.url, headers: episode.headers }
+        : await playbackWithTimeout(sources, episode.sourceId ?? '', episode.url, 1_500);
+      return { index, name: line.name, url: resolved.url, headers: resolved.headers };
+    } catch {
+      return null;
+    }
+  }))).filter((candidate): candidate is RouteCandidate => Boolean(candidate));
+  if (candidates.length < 2) return lines;
+  const rankedIndexes = await rankRouteCandidates(candidates, { proxyPort, adFiltering, budgetMs: 3_500 });
+  const ranked = rankedIndexes.map((index) => lines[index]).filter(Boolean);
+  const rankedSet = new Set(rankedIndexes);
+  return [...ranked, ...lines.filter((_line, index) => !rankedSet.has(index))];
 }
 
 export async function testSource(source: CmsSource): Promise<{ ok: boolean; latencyMs: number; message: string }> {

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import 'storage_service.dart';
 import 'local_engine.dart';
+import 'system_playback_controls.dart';
 import 'video_engine.dart';
 
 /// Central app state for the on-device engine and local library.
@@ -13,11 +14,13 @@ class AppState extends ChangeNotifier {
   List<MediaItem> _favorites = [];
   List<HistoryItem> _history = [];
   String _qualityPreference = 'auto';
+  bool _isEmulator = false;
 
   List<CmsSource> get sources => _sources;
   List<MediaItem> get favorites => _favorites;
   List<HistoryItem> get history => _history;
   String get qualityPreference => _qualityPreference;
+  bool get isEmulator => _isEmulator;
   VideoEngine get engine => _engine;
 
   Future<void> initialize() async {
@@ -25,6 +28,7 @@ class AppState extends ChangeNotifier {
     _favorites = await _storage.getFavorites();
     _history = await _storage.getHistory();
     _qualityPreference = await _storage.getQualityPreference();
+    _isEmulator = await SystemPlaybackControls.isEmulator();
     notifyListeners();
   }
 

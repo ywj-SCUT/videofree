@@ -9,6 +9,7 @@ import '../models/models.dart';
 import '../services/app_state.dart';
 import '../services/playback_proxy.dart';
 import '../services/quality_selector.dart';
+import '../services/route_engine.dart';
 import '../services/system_playback_controls.dart';
 import '../theme/app_theme.dart';
 
@@ -31,6 +32,103 @@ bool shouldApplyResumeSeek(
       (duration > Duration.zero || position > Duration.zero);
 }
 
+const playbackReadyProgressThreshold = Duration(seconds: 3);
+const playbackRouteHealthThreshold = Duration(seconds: 8);
+
+Duration continuousPlaybackProgress({
+  required Duration accumulated,
+  required Duration? previousPosition,
+  required Duration position,
+  required bool playing,
+  required bool buffering,
+}) {
+  if (!playing || buffering || previousPosition == null) {
+    return Duration.zero;
+  }
+  final delta = position - previousPosition;
+  if (delta < Duration.zero || delta > const Duration(seconds: 3)) {
+    return Duration.zero;
+  }
+  return accumulated + delta;
+}
+
+bool hasVerifiedPlaybackProgress({
+  required Duration duration,
+  required bool playing,
+  required bool buffering,
+  required Duration continuousProgress,
+  required Duration threshold,
+}) =>
+    duration > Duration.zero &&
+    playing &&
+    !buffering &&
+    continuousProgress >= threshold;
+
+bool needsStartupFailover({
+  required Duration duration,
+  required bool playing,
+  required bool buffering,
+  required Duration continuousProgress,
+}) => !hasVerifiedPlaybackProgress(
+  duration: duration,
+  playing: playing,
+  buffering: buffering,
+  continuousProgress: continuousProgress,
+  threshold: playbackRouteHealthThreshold,
+);
+
+// A short stable-playback window prevents background downloads from restarting
+// immediately after a buffer event and contending with foreground recovery.
+const timelinePrefetchStabilityThreshold = Duration(seconds: 3);
+const playbackProgressStallThreshold = Duration(seconds: 5);
+const playbackSeekFailoverGrace = Duration(seconds: 25);
+
+bool isPlaybackProgressStalled({
+  required Duration baselinePosition,
+  required Duration currentPosition,
+  required Duration elapsed,
+  required bool opened,
+  required bool playing,
+  required bool buffering,
+  required bool nearEnd,
+}) {
+  if (!opened ||
+      !playing ||
+      buffering ||
+      nearEnd ||
+      currentPosition < const Duration(seconds: 1)) {
+    return false;
+  }
+  return currentPosition - baselinePosition <
+          const Duration(milliseconds: 500) &&
+      elapsed >= playbackProgressStallThreshold;
+}
+
+bool isTimelinePositionDiscontinuity(
+  Duration? previousPosition,
+  Duration position,
+) {
+  if (previousPosition == null) return false;
+  final delta = position - previousPosition;
+  return delta < Duration.zero || delta > const Duration(seconds: 3);
+}
+
+Duration timelinePrefetchStableDuration({
+  required Duration accumulated,
+  required Duration? previousPosition,
+  required Duration position,
+  required bool playing,
+  required bool buffering,
+}) {
+  return continuousPlaybackProgress(
+    accumulated: accumulated,
+    previousPosition: previousPosition,
+    position: position,
+    playing: playing,
+    buffering: buffering,
+  );
+}
+
 bool isPlaybackToggleDoubleTap(
   Duration? previousTime,
   Offset? previousPosition,
@@ -46,6 +144,51 @@ bool isPlaybackToggleRegion(Offset position, Size size) {
   final topInset = math.min(72.0, size.height * .22);
   final bottomInset = math.min(96.0, size.height * .24);
   return position.dy >= topInset && position.dy <= size.height - bottomInset;
+}
+
+int matchingEpisodeIndex(PlayLine line, String episodeName, int fallbackIndex) {
+  if (line.episodes.isEmpty) return -1;
+  final exact = line.episodes.indexWhere(
+    (episode) => episode.name == episodeName,
+  );
+  if (exact >= 0) return exact;
+  final episodeNumber = int.tryParse(
+    RegExp(r'\d+').firstMatch(episodeName)?.group(0) ?? '',
+  );
+  if (episodeNumber != null) {
+    final numbered = line.episodes.indexWhere(
+      (episode) =>
+          int.tryParse(
+            RegExp(r'\d+').firstMatch(episode.name)?.group(0) ?? '',
+          ) ==
+          episodeNumber,
+    );
+    if (numbered >= 0) return numbered;
+  }
+  return fallbackIndex.clamp(0, line.episodes.length - 1).toInt();
+}
+
+List<({int lineIndex, int episodeIndex})> failoverTargets(
+  List<PlayLine> lines,
+  int currentLine,
+  Set<int> failedLines,
+  String episodeName,
+  int fallbackEpisode,
+) {
+  final targets = <({int lineIndex, int episodeIndex})>[];
+  for (var offset = 1; offset < lines.length; offset++) {
+    final lineIndex = (currentLine + offset) % lines.length;
+    if (failedLines.contains(lineIndex)) continue;
+    final episodeIndex = matchingEpisodeIndex(
+      lines[lineIndex],
+      episodeName,
+      fallbackEpisode,
+    );
+    if (episodeIndex >= 0) {
+      targets.add((lineIndex: lineIndex, episodeIndex: episodeIndex));
+    }
+  }
+  return targets;
 }
 
 class PlayerScreen extends StatefulWidget {
@@ -79,6 +222,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _error;
   Timer? _saveTimer;
   Timer? _stallTimer;
+  Timer? _startupTimer;
+  Timer? _prefetchTimer;
+  Timer? _progressWatchdogTimer;
   StreamSubscription<Tracks>? _tracksSubscription;
   StreamSubscription<Track>? _trackSubscription;
   StreamSubscription<Duration>? _durationSubscription;
@@ -96,9 +242,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Duration? _lastPointerDown;
   Offset? _lastPointerPosition;
   bool _allowPop = false;
+  bool _autoSwitching = false;
+  final Set<int> _failedLines = {};
+  int? _healthyLineIndex;
+  Uri? _prefetchUrl;
+  bool _prefetchStarted = false;
+  Duration? _lastPrefetchPosition;
+  Duration _stablePrefetchPlayback = Duration.zero;
+  Duration? _lastRouteHealthPosition;
+  Duration _stableRoutePlayback = Duration.zero;
+  Duration _watchdogPosition = Duration.zero;
+  DateTime _watchdogAdvancedAt = DateTime.now();
+  DateTime? _seekGraceUntil;
 
   double _brightness = 0.5;
   double _volume = 0.5;
+  double? _longPressPreviousRate;
 
   static const _speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
 
@@ -116,7 +275,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _player = Player(
       configuration: const PlayerConfiguration(bufferSize: 96 * 1024 * 1024),
     );
-    _videoController = VideoController(_player);
+    // libmpv's Android GPU context is not available on the API 35 AVD. Keep
+    // the default GPU output on physical devices, but render emulator frames
+    // through MediaCodec's Surface so online playback remains testable there.
+    _videoController = VideoController(
+      _player,
+      configuration: widget.appState.isEmulator
+          ? const VideoControllerConfiguration(
+              vo: 'mediacodec_embed',
+              hwdec: 'mediacodec',
+            )
+          : const VideoControllerConfiguration(),
+    );
     _tracksSubscription = _player.stream.tracks.listen(_handleTracks);
     _trackSubscription = _player.stream.track.listen((track) {
       if (mounted) setState(() => _selectedTrackId = track.video.id);
@@ -124,16 +294,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _durationSubscription = _player.stream.duration.listen((_) {
       _applyResumeIfReady();
     });
-    _positionSubscription = _player.stream.position.listen((_) {
+    _positionSubscription = _player.stream.position.listen((position) {
       _applyResumeIfReady();
+      _observeTimelinePrefetch(position);
+      _observeRouteHealth(position);
     });
     _bufferingSubscription = _player.stream.buffering.listen(_handleBuffering);
+    _progressWatchdogTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _watchPlaybackProgress(),
+    );
     unawaited(_loadSystemLevels());
     _openCurrent();
     _saveTimer = Timer.periodic(
       const Duration(seconds: 5),
       (_) => _saveProgress(),
     );
+  }
+
+  void _observeRouteHealth(Duration position) {
+    _stableRoutePlayback = continuousPlaybackProgress(
+      accumulated: _stableRoutePlayback,
+      previousPosition: _lastRouteHealthPosition,
+      position: position,
+      playing: _player.state.playing,
+      buffering: _player.state.buffering,
+    );
+    _lastRouteHealthPosition = position;
+    if (hasVerifiedPlaybackProgress(
+      duration: _player.state.duration,
+      playing: _player.state.playing,
+      buffering: _player.state.buffering,
+      continuousProgress: _stableRoutePlayback,
+      threshold: playbackRouteHealthThreshold,
+    )) {
+      if (_startupTimer != null) {
+        _startupTimer?.cancel();
+        _startupTimer = null;
+      }
+      if (_healthyLineIndex != _lineIndex) {
+        _healthyLineIndex = _lineIndex;
+        _failedLines.remove(_lineIndex);
+        RouteEngine.recordPlaybackSuccess(_current);
+      }
+    }
   }
 
   Future<void> _configureMpvCache() async {
@@ -148,7 +352,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         platform.setProperty('demuxer-max-back-bytes', '33554432'),
         platform.setProperty('cache-pause', 'yes'),
         platform.setProperty('cache-pause-initial', 'yes'),
-        platform.setProperty('cache-pause-wait', '3'),
+        platform.setProperty('cache-pause-wait', '1'),
         platform.setProperty('network-timeout', '45'),
         platform.setProperty('stream-buffer-size', '1048576'),
       ]);
@@ -168,15 +372,117 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!buffering) {
       _stallTimer?.cancel();
       _stallTimer = null;
+      _seekGraceUntil = null;
+      _scheduleTimelinePrefetch();
       return;
     }
+    final position = _player.state.position;
+    if (isTimelinePositionDiscontinuity(_lastPrefetchPosition, position)) {
+      _armSeekGrace();
+    }
+    _stableRoutePlayback = Duration.zero;
+    _lastRouteHealthPosition = position;
+    _stablePrefetchPlayback = Duration.zero;
+    _lastPrefetchPosition = position;
+    final seekGrace = _seekGraceUntil;
+    if (seekGrace != null && DateTime.now().isBefore(seekGrace)) return;
+    if (_prefetchTimer != null || _prefetchStarted) {
+      _stopTimelinePrefetch(clearSource: false);
+    }
     if (!_opened || _stallTimer != null) return;
-    _stallTimer = Timer(const Duration(seconds: 4), _downgradeAfterStall);
+    _stallTimer = Timer(const Duration(seconds: 10), _downgradeAfterStall);
+  }
+
+  void _resetProgressWatchdog([Duration? position]) {
+    _watchdogPosition = position ?? _player.state.position;
+    _watchdogAdvancedAt = DateTime.now();
+  }
+
+  void _watchPlaybackProgress() {
+    final position = _player.state.position;
+    final now = DateTime.now();
+    final advanced =
+        position < _watchdogPosition ||
+        position - _watchdogPosition >= const Duration(milliseconds: 500);
+    if (advanced ||
+        !_opened ||
+        !_player.state.playing ||
+        _player.state.buffering ||
+        _isNearEnd) {
+      _watchdogPosition = position;
+      _watchdogAdvancedAt = now;
+      return;
+    }
+    if (isPlaybackProgressStalled(
+      baselinePosition: _watchdogPosition,
+      currentPosition: position,
+      elapsed: now.difference(_watchdogAdvancedAt),
+      opened: _opened,
+      playing: _player.state.playing,
+      buffering: _player.state.buffering,
+      nearEnd: _isNearEnd,
+    )) {
+      _resetProgressWatchdog(position);
+      unawaited(_tryAutoSwitch('线路播放停滞'));
+    }
+  }
+
+  void _observeTimelinePrefetch(Duration position) {
+    final previous = _lastPrefetchPosition;
+    final discontinuity = isTimelinePositionDiscontinuity(previous, position);
+    _stablePrefetchPlayback = timelinePrefetchStableDuration(
+      accumulated: _stablePrefetchPlayback,
+      previousPosition: previous,
+      position: position,
+      playing: _player.state.playing,
+      buffering: _player.state.buffering,
+    );
+    _lastPrefetchPosition = position;
+    if (discontinuity) _armSeekGrace();
+    _scheduleTimelinePrefetch();
+  }
+
+  void _armSeekGrace() {
+    _seekGraceUntil = DateTime.now().add(playbackSeekFailoverGrace);
+    _stallTimer?.cancel();
+    _stallTimer = Timer(playbackSeekFailoverGrace, _downgradeAfterStall);
+  }
+
+  void _scheduleTimelinePrefetch() {
+    final prefetchUrl = _prefetchUrl;
+    if (!_opened ||
+        _player.state.buffering ||
+        prefetchUrl == null ||
+        _stablePrefetchPlayback < timelinePrefetchStabilityThreshold ||
+        _prefetchStarted ||
+        _prefetchTimer != null) {
+      return;
+    }
+    _prefetchTimer = Timer(const Duration(milliseconds: 500), () {
+      _prefetchTimer = null;
+      if (!mounted ||
+          !_opened ||
+          _player.state.buffering ||
+          _prefetchUrl != prefetchUrl) {
+        return;
+      }
+      _prefetchStarted = true;
+      unawaited(PlaybackProxy.instance.prefetchTimeline(prefetchUrl));
+    });
+  }
+
+  void _stopTimelinePrefetch({required bool clearSource}) {
+    _prefetchTimer?.cancel();
+    _prefetchTimer = null;
+    if (_prefetchStarted) PlaybackProxy.instance.stopPrefetch();
+    _prefetchStarted = false;
+    if (clearSource) _prefetchUrl = null;
   }
 
   Future<void> _downgradeAfterStall() async {
     _stallTimer = null;
-    if (!_player.state.buffering || _selectedTrackId == 'auto') return;
+    _seekGraceUntil = null;
+    if (!_player.state.buffering || _isNearEnd) return;
     final real = _videoTracks.where((track) => track.id != 'auto').toList()
       ..sort(
         (left, right) => ((left.w ?? 0) * (left.h ?? 0)).compareTo(
@@ -186,20 +492,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final currentIndex = real.indexWhere(
       (track) => track.id == _selectedTrackId,
     );
-    final next = currentIndex > 0 ? real[currentIndex - 1] : VideoTrack.auto();
-    await _player.setVideoTrack(next);
-    if (mounted) {
-      setState(() => _selectedTrackId = next.id);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            next.id == 'auto'
-                ? '网络波动，已恢复自动画质'
-                : '网络波动，已自动降至 ${videoTrackLabel(next)}',
-          ),
-        ),
-      );
+    if (_selectedTrackId != 'auto' && currentIndex > 0) {
+      final next = real[currentIndex - 1];
+      await _player.setVideoTrack(next);
+      if (mounted) {
+        setState(() => _selectedTrackId = next.id);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('网络波动，已自动降至 ${videoTrackLabel(next)}')),
+        );
+      }
+      if (_player.state.buffering) {
+        _stallTimer = Timer(const Duration(seconds: 7), _switchAfterStall);
+      }
+      return;
     }
+    await _switchAfterStall();
+  }
+
+  bool get _isNearEnd {
+    final duration = _player.state.duration;
+    return duration > Duration.zero &&
+        _player.state.position >= duration - const Duration(seconds: 3);
+  }
+
+  Future<void> _switchAfterStall() async {
+    _stallTimer = null;
+    if (!_player.state.buffering || _isNearEnd) return;
+    await _tryAutoSwitch('线路持续缓冲');
   }
 
   Episode get _current => widget.playLines[_lineIndex].episodes[_episodeIndex];
@@ -256,12 +575,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Future<void> _openCurrent() async {
+  Future<bool> _openCurrent({
+    bool allowAutoSwitch = true,
+    bool scheduleStartupCheck = true,
+  }) async {
     _opened = false;
+    _stopTimelinePrefetch(clearSource: true);
+    _lastPrefetchPosition = null;
+    _stablePrefetchPlayback = Duration.zero;
+    _lastRouteHealthPosition = null;
+    _stableRoutePlayback = Duration.zero;
     _resumeApplied = false;
     _resumeSeekInFlight = false;
+    _seekGraceUntil = null;
+    _resetProgressWatchdog(Duration.zero);
     _stallTimer?.cancel();
     _stallTimer = null;
+    _startupTimer?.cancel();
+    _startupTimer = null;
     setState(() {
       _loading = true;
       _error = null;
@@ -283,11 +614,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
         headers = resolved.headers;
       }
       if (url.startsWith('http://') || url.startsWith('https://')) {
-        url = (await PlaybackProxy.instance.urlFor(
+        final proxyUrl = await PlaybackProxy.instance.urlFor(
           url,
           headers: headers,
           filterAds: true,
-        )).toString();
+        );
+        _prefetchUrl = proxyUrl;
+        url = proxyUrl.toString();
         headers = null;
       }
       // mpv properties must be set before opening the URL. Otherwise the
@@ -301,19 +634,167 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // Media.start is applied by mpv while loading. The stream-driven seek
       // below verifies the resulting position and compensates if a source
       // resets its timeline after open() returns.
-      await _player.open(Media(url, httpHeaders: headers, start: resumeStart));
+      await _player
+          .open(Media(url, httpHeaders: headers, start: resumeStart))
+          .timeout(const Duration(seconds: 8));
       _opened = true;
       await _player.setRate(_playbackRate);
       await _applyResumeIfReady();
+      if (scheduleStartupCheck) {
+        // Some encrypted HLS routes need several seconds for the key and first
+        // media segment before the decoder exposes duration.  Keep the route
+        // alive long enough to verify real progress instead of switching a
+        // healthy but slow line while its first frame is still arriving.
+        _startupTimer = Timer(const Duration(seconds: 30), () {
+          if (_opened &&
+              needsStartupFailover(
+                duration: _player.state.duration,
+                playing: _player.state.playing,
+                buffering: _player.state.buffering,
+                continuousProgress: _stableRoutePlayback,
+              ) &&
+              !_isNearEnd) {
+            unawaited(_tryAutoSwitch('线路首播超时'));
+          }
+        });
+      }
+      if (_player.state.buffering) _handleBuffering(true);
+      if (!_player.state.buffering) _scheduleTimelinePrefetch();
       if (mounted) setState(() => _loading = false);
+      return true;
     } catch (error) {
       _opened = false;
-      if (!mounted) return;
+      if (!_failedLines.contains(_lineIndex)) {
+        RouteEngine.recordPlaybackFailure(_current);
+        _failedLines.add(_lineIndex);
+      }
+      if (allowAutoSwitch && await _tryAutoSwitch(error.toString())) {
+        return true;
+      }
+      if (!mounted) return false;
       setState(() {
         _error = error.toString();
         _loading = false;
       });
+      return false;
     }
+  }
+
+  Future<bool> _tryAutoSwitch(String reason) async {
+    if (_autoSwitching || widget.playLines.length < 2) return false;
+    _autoSwitching = true;
+    final originalLine = _lineIndex;
+    final episodeName = _current.name;
+    final fallbackIndex = _episodeIndex;
+    final position = _player.state.position;
+    final duration = _player.state.duration;
+    var previousLine = originalLine;
+    var attemptStartPosition = position;
+    try {
+      await _saveProgress();
+      if (!_failedLines.contains(_lineIndex)) {
+        RouteEngine.recordPlaybackFailure(_current);
+        _failedLines.add(_lineIndex);
+      }
+      final targets = failoverTargets(
+        widget.playLines,
+        originalLine,
+        _failedLines,
+        episodeName,
+        fallbackIndex,
+      );
+      for (final target in targets) {
+        final nextLine = target.lineIndex;
+        final nextEpisode = target.episodeIndex;
+        final oldLineName = widget.playLines[previousLine].name;
+        final newLineName = widget.playLines[nextLine].name;
+        if (position > Duration.zero) {
+          _resume = HistoryItem(
+            item: widget.item,
+            lineName: widget.playLines[nextLine].name,
+            episodeName: widget.playLines[nextLine].episodes[nextEpisode].name,
+            progress: position.inMilliseconds / 1000,
+            duration: duration.inMilliseconds / 1000,
+            watchedAt: DateTime.now().millisecondsSinceEpoch,
+          );
+        }
+        if (mounted) {
+          setState(() {
+            _lineIndex = nextLine;
+            _episodeIndex = nextEpisode;
+          });
+        } else {
+          _lineIndex = nextLine;
+          _episodeIndex = nextEpisode;
+        }
+        final opened = await _openCurrent(
+          allowAutoSwitch: false,
+          scheduleStartupCheck: false,
+        );
+        final ready = opened && await _waitForPlaybackReady();
+        final finalPosition = _player.state.position;
+        debugPrint(
+          'PLAYBACK_FAILOVER reason=$reason old=$oldLineName new=$newLineName '
+          'startMs=${attemptStartPosition.inMilliseconds} '
+          'finalMs=${finalPosition.inMilliseconds} ready=$ready',
+        );
+        if (ready) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '$reason，已切换至 ${widget.playLines[nextLine].name}',
+                ),
+              ),
+            );
+          }
+          return true;
+        }
+        previousLine = nextLine;
+        attemptStartPosition = finalPosition;
+        if (!_failedLines.contains(nextLine)) {
+          RouteEngine.recordPlaybackFailure(_current);
+          _failedLines.add(nextLine);
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _error = '所有线路启动超时，请重试';
+          _loading = false;
+        });
+      }
+      return false;
+    } finally {
+      _autoSwitching = false;
+    }
+  }
+
+  Future<bool> _waitForPlaybackReady() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    Duration? previousPosition;
+    var continuousProgress = Duration.zero;
+    while (mounted && _opened && DateTime.now().isBefore(deadline)) {
+      final position = _player.state.position;
+      continuousProgress = continuousPlaybackProgress(
+        accumulated: continuousProgress,
+        previousPosition: previousPosition,
+        position: position,
+        playing: _player.state.playing,
+        buffering: _player.state.buffering,
+      );
+      previousPosition = position;
+      if (hasVerifiedPlaybackProgress(
+        duration: _player.state.duration,
+        playing: _player.state.playing,
+        buffering: _player.state.buffering,
+        continuousProgress: continuousProgress,
+        threshold: playbackReadyProgressThreshold,
+      )) {
+        return true;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    return false;
   }
 
   Future<void> _saveProgress() async {
@@ -337,13 +818,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _selectLine(int index) async {
     if (index == _lineIndex) return;
+    final episodeName = _current.name;
+    final nextEpisodeIndex = matchingEpisodeIndex(
+      widget.playLines[index],
+      episodeName,
+      _episodeIndex,
+    );
     await _saveProgress();
     _resume = null;
     HapticFeedback.selectionClick();
     setState(() {
       _lineIndex = index;
-      _episodeIndex = 0;
+      _episodeIndex = nextEpisodeIndex;
     });
+    _failedLines.remove(index);
     _openCurrent();
   }
 
@@ -353,6 +841,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _resume = null;
     HapticFeedback.selectionClick();
     setState(() => _episodeIndex = index);
+    _failedLines.remove(_lineIndex);
+    _openCurrent();
+  }
+
+  void _retryPlayback() {
+    _failedLines.clear();
     _openCurrent();
   }
 
@@ -360,6 +854,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _saveTimer?.cancel();
     _stallTimer?.cancel();
+    _startupTimer?.cancel();
+    _progressWatchdogTimer?.cancel();
+    _stopTimelinePrefetch(clearSource: true);
     _tracksSubscription?.cancel();
     _trackSubscription?.cancel();
     _durationSubscription?.cancel();
@@ -421,8 +918,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               volumeGesture: true,
               brightnessGesture: true,
               gesturesEnabledWhileControlsVisible: true,
-              speedUpOnLongPress: true,
-              speedUpFactor: 2.0,
+              speedUpOnLongPress: false,
               initialVolume: _volume,
               initialBrightness: _brightness,
               onVolumeChanged: _setSystemVolume,
@@ -497,7 +993,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ),
                         const SizedBox(height: 10),
                         FilledButton.icon(
-                          onPressed: _openCurrent,
+                          onPressed: _retryPlayback,
                           icon: const Icon(Icons.refresh_rounded),
                           label: const Text('重试'),
                         ),
@@ -536,9 +1032,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
           event,
           Size(constraints.maxWidth, constraints.maxHeight),
         ),
-        child: MaterialVideoControls(state),
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onLongPressStart: _startLongPressSpeedBoost,
+          onLongPressEnd: _endLongPressSpeedBoost,
+          child: MaterialVideoControls(state),
+        ),
       ),
     );
+  }
+
+  void _startLongPressSpeedBoost(LongPressStartDetails details) {
+    if (_longPressPreviousRate != null) return;
+    _longPressPreviousRate = _player.state.rate;
+    HapticFeedback.mediumImpact();
+    unawaited(_player.setRate(2.0));
+  }
+
+  void _endLongPressSpeedBoost(LongPressEndDetails details) {
+    final previousRate = _longPressPreviousRate;
+    _longPressPreviousRate = null;
+    if (previousRate != null) unawaited(_player.setRate(previousRate));
   }
 
   void _handlePointerDown(PointerDownEvent event, Size size) {
