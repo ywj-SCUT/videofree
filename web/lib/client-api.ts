@@ -7,7 +7,7 @@ import type {
 
 const SETTINGS_KEY = 'videoget.settings.v1';
 const PLAYBACK_TUNING_KEY = 'videoget.playback-tuning.v2';
-const MANAGED_SOURCES_KEY = 'videoget.managed-sources.v3';
+const MANAGED_SOURCES_KEY = 'videoget.managed-sources.v4';
 const LIBRARY_KEY = 'videoget.library.v1';
 const defaultSources: CmsSource[] = [
   { id: 'builtin-short-tikhub-tiktok', name: 'TikTok 推荐', type: 'short-api', api: 'https://api.tikhub.io', provider: 'tikhub-tiktok', region: 'US', enabled: false, searchable: true },
@@ -21,6 +21,11 @@ const defaultSources: CmsSource[] = [
   { id: 'builtin-line-f', name: '默认线路 F', type: 'cms', api: 'https://cj.rycjapi.com/api.php/provide/vod/', enabled: true, searchable: true },
   { id: 'builtin-line-g', name: '默认线路 G', type: 'cms', api: 'https://cj.ffzyapi.com/api.php/provide/vod/', enabled: true, searchable: true },
   { id: 'builtin-line-h', name: '默认线路 H', type: 'cms', api: 'https://bfzyapi.com/api.php/provide/vod/', enabled: true, searchable: true },
+  { id: 'builtin-line-i', name: '默认线路 I', type: 'cms', api: 'https://ikunzyapi.com/api.php/provide/vod/', enabled: true, searchable: true },
+  { id: 'builtin-line-j', name: '默认线路 J', type: 'cms', api: 'https://api.guangsuapi.com/api.php/provide/vod/from/gsm3u8', enabled: true, searchable: true },
+  { id: 'builtin-line-k', name: '默认线路 K', type: 'cms', api: 'https://jyzyapi.com/provide/vod/from/jinyingm3u8', enabled: true, searchable: true },
+  { id: 'builtin-line-l', name: '默认线路 L', type: 'cms', api: 'https://360zy.com/api.php/provide/vod', enabled: true, searchable: true },
+  { id: 'builtin-line-m', name: '默认线路 M', type: 'cms', api: 'https://iqiyizyapi.com/api.php/provide/vod', enabled: true, searchable: true },
 ];
 const defaultSettings: AppSettings = {
   sources: defaultSources,

@@ -18,6 +18,20 @@ String _manifest(List<String> groups) => [
 ].join('\n');
 
 void main() {
+  test('limits master playlist variants to the highest eligible height', () {
+    const master = '''#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=1200000,RESOLUTION=854x480
+480/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720
+720/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=5200000,RESOLUTION=1920x1080
+1080/index.m3u8''';
+    final limited = limitHlsVariantHeight(master, 720);
+    expect(limited, contains('720/index.m3u8'));
+    expect(limited, isNot(contains('480/index.m3u8')));
+    expect(limited, isNot(contains('1080/index.m3u8')));
+  });
+
   test('filters marked and named HLS ad segments without false positives', () {
     const manifest = '''#EXTM3U
 #EXT-X-MEDIA-SEQUENCE:10
@@ -43,6 +57,27 @@ media/shadow-play.ts
     expect(result.manifest, contains('pcdn/main-adsorption.ts'));
     expect(result.manifest, contains('media/shadow-play.ts'));
     expect(result.manifest, isNot(contains('mid-1.ts')));
+  });
+
+  test('filters gambling ad segments by URI markers', () {
+    const manifest = '''#EXTM3U
+#EXT-X-MEDIA-SEQUENCE:20
+#EXTINF:5,
+main/intro.ts
+#EXTINF:5,
+casino/spot-0.ts
+#EXTINF:5,
+content/betting-roll.ts
+#EXTINF:5,
+main/episode-1.ts
+#EXT-X-ENDLIST''';
+    final result = filterHlsManifest(manifest);
+    expect(result.removedSegments, 2);
+    expect(result.removedDuration, 10);
+    expect(result.manifest, contains('main/intro.ts'));
+    expect(result.manifest, contains('main/episode-1.ts'));
+    expect(result.manifest, isNot(contains('casino/spot-0.ts')));
+    expect(result.manifest, isNot(contains('content/betting-roll.ts')));
   });
 
   test('restores encryption key and init map after a removed ad segment', () {

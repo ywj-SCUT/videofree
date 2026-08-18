@@ -12,6 +12,7 @@ const _maxCacheBytes = 4 * 1024 * 1024 * 1024;
 const _maxEntryBytes = 100 * 1024 * 1024;
 const _upstreamResponseTimeout = Duration(seconds: 12);
 const _directProbeTimeout = Duration(seconds: 4);
+const _warmupTimeout = Duration(seconds: 4);
 // A distant VOD segment can be several megabytes on a congested mobile
 // route.  Prefetch is background work, so give the body enough time to finish
 // instead of cancelling the local proxy request while the player is seeking.
@@ -19,10 +20,9 @@ const _prefetchResponseTimeout = Duration(seconds: 90);
 const _prefetchSnapshotLifetime = Duration(seconds: 30);
 const _rangePrefetchMinimumAge = Duration(seconds: 3);
 const _rangePrefetchWaitTimeout = Duration(milliseconds: 4500);
-// Keep one upstream lane free for foreground playback. The seek anchors are
-// still fetched before sequential backfill, but a second background transfer
-// can otherwise starve the segment mpv is currently decoding on slower hosts.
-const _prefetchConcurrency = 1;
+// Two anchor requests keep 5/10-minute seeks warm while leaving bandwidth for
+// the foreground segment. Sequential backfill remains single-lane below.
+const _prefetchConcurrency = 2;
 const _prefetchOpeningSegments = 6;
 const _prefetchMaxSegments = 24;
 const _prefetchAnchorSeconds = 5 * 60.0;
@@ -417,11 +417,13 @@ class PlaybackProxy {
     String source, {
     Map<String, String>? headers,
     bool filterAds = true,
+    int? maxHeight,
   }) async {
     await start();
     return Uri.http('127.0.0.1:${_server!.port}', '/stream', {
       'url': source,
       if (filterAds) 'filterAds': '1',
+      if (maxHeight != null && maxHeight > 0) 'maxHeight': '$maxHeight',
       if (headers != null && headers.isNotEmpty) 'headers': jsonEncode(headers),
     });
   }
@@ -449,6 +451,15 @@ class PlaybackProxy {
           prioritySegments: 1,
         );
         if (targets.isNotEmpty) {
+          final upstream = Uri.tryParse(
+            targets.first.queryParameters['url'] ?? '',
+          );
+          if (upstream != null &&
+              upstream.scheme.toLowerCase() == 'https' &&
+              upstream.port > 0 &&
+              upstream.port != 443) {
+            return false;
+          }
           return _warmupTarget(client, targets.first);
         }
         final variants = _hlsVariantManifests(manifest, manifestUri);
@@ -464,10 +475,8 @@ class PlaybackProxy {
   }
 
   Future<String?> _readWarmupManifest(HttpClient client, Uri uri) async {
-    final request = await client
-        .getUrl(uri)
-        .timeout(const Duration(seconds: 3));
-    final response = await request.close().timeout(_upstreamResponseTimeout);
+    final request = await client.getUrl(uri).timeout(_warmupTimeout);
+    final response = await request.close().timeout(_warmupTimeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final body = await utf8.decoder.bind(response).join();
       developer.log(
@@ -476,14 +485,12 @@ class PlaybackProxy {
       );
       return null;
     }
-    return utf8.decoder.bind(response).join().timeout(_upstreamResponseTimeout);
+    return utf8.decoder.bind(response).join().timeout(_warmupTimeout);
   }
 
   Future<bool> _warmupTarget(HttpClient client, Uri target) async {
-    final request = await client
-        .getUrl(target)
-        .timeout(const Duration(seconds: 3));
-    final response = await request.close().timeout(_upstreamResponseTimeout);
+    final request = await client.getUrl(target).timeout(_warmupTimeout);
+    final response = await request.close().timeout(_warmupTimeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final body = await utf8.decoder.bind(response).join();
       developer.log(
@@ -493,7 +500,7 @@ class PlaybackProxy {
       return false;
     }
     var bytes = 0;
-    await for (final chunk in response.timeout(_prefetchResponseTimeout)) {
+    await for (final chunk in response.timeout(_warmupTimeout)) {
       bytes += chunk.length;
     }
     return bytes > 0;
@@ -888,10 +895,16 @@ class PlaybackProxy {
         if (opened.usedProxy) {
           inheritHlsProxyPreference(original, target);
         }
+        final maxHeight = int.tryParse(
+          request.uri.queryParameters['maxHeight'] ?? '',
+        );
+        final limited = maxHeight != null
+            ? limitHlsVariantHeight(original, maxHeight)
+            : original;
         final filtered = request.uri.queryParameters['filterAds'] == '1'
-            ? filterHlsManifest(original)
+            ? filterHlsManifest(limited)
             : HlsFilterResult(
-                manifest: original,
+                manifest: limited,
                 removedSegments: 0,
                 removedDuration: 0,
                 removedMarkers: 0,
@@ -913,6 +926,7 @@ class PlaybackProxy {
           target,
           customHeaders,
           request.uri.queryParameters['filterAds'] == '1',
+          maxHeight,
         );
         final localManifestUri = Uri.parse(
           'http://127.0.0.1:${_server!.port}${request.uri}',
@@ -1228,6 +1242,7 @@ class PlaybackProxy {
     Uri manifestUrl,
     Map<String, String> headers,
     bool filterAds,
+    int? maxHeight,
   ) {
     return manifest
         .split(RegExp(r'\r?\n'))
@@ -1237,7 +1252,7 @@ class PlaybackProxy {
           if (trimmed.startsWith('#')) {
             return line.replaceAllMapped(RegExp(r'URI="([^"]+)"'), (match) {
               final absolute = manifestUrl.resolve(match.group(1)!).toString();
-              return 'URI="${_localUrl(absolute, headers, filterAds, manifestUrl.toString())}"';
+              return 'URI="${_localUrl(absolute, headers, filterAds, manifestUrl.toString(), maxHeight)}"';
             });
           }
           return _localUrl(
@@ -1245,6 +1260,7 @@ class PlaybackProxy {
             headers,
             filterAds,
             manifestUrl.toString(),
+            maxHeight,
           );
         })
         .join('\n');
@@ -1255,10 +1271,12 @@ class PlaybackProxy {
     Map<String, String> headers,
     bool filterAds,
     String referer,
+    int? maxHeight,
   ) => Uri.http('127.0.0.1:${_server!.port}', '/stream', {
     'url': target,
     'referer': referer,
     if (filterAds) 'filterAds': '1',
+    if (maxHeight != null && maxHeight > 0) 'maxHeight': '$maxHeight',
     if (headers.isNotEmpty) 'headers': jsonEncode(headers),
   }).toString();
 

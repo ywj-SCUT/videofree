@@ -75,6 +75,39 @@ void main() {
     expect(ranked.first.name, '稳定直连线路');
   });
 
+  test('非标准 HTTPS 媒体端口排在标准端口之后', () async {
+    final engine = RouteEngine(
+      probe:
+          (
+            String url, {
+            Map<String, String>? headers,
+            Duration timeout = const Duration(seconds: 3),
+            int maxBytes = 256 * 1024,
+          }) async => RemoteProbe(
+            bytes: Uint8List(192 * 1024),
+            timeToFirstByte: const Duration(milliseconds: 80),
+            elapsed: const Duration(milliseconds: 250),
+            contentType: 'video/mp4',
+            finalUri: Uri.parse(url),
+          ),
+    );
+
+    final ranked = await engine.rankLines(const [
+      PlayLine(
+        name: '加密非标准端口',
+        episodes: [
+          Episode(name: '第1集', url: 'https://media.test:65/video.mp4'),
+        ],
+      ),
+      PlayLine(
+        name: '标准 HTTPS 端口',
+        episodes: [Episode(name: '第1集', url: 'https://media.test/video.mp4')],
+      ),
+    ]);
+
+    expect(ranked.first.name, '标准 HTTPS 端口');
+  });
+
   test('实时低延迟线路优先于已过期的历史稳定先验', () async {
     final engine = RouteEngine(
       probe:

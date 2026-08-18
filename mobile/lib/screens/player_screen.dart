@@ -34,9 +34,18 @@ bool shouldApplyResumeSeek(
 
 const playbackReadyProgressThreshold = Duration(seconds: 3);
 const playbackRouteHealthThreshold = Duration(seconds: 8);
+// The release network gate requires cold playback to begin within 20 seconds.
+// Keep a small margin for the test harness and make all startup failover
+// attempts share one wall-clock budget instead of multiplying per-route waits.
+const playbackStartupBudget = Duration(seconds: 18);
+const playbackFailoverBudget = Duration(seconds: 18);
 const playbackResetPositionThreshold = Duration(seconds: 1);
-const playbackResetRecoveryDelay = Duration(seconds: 4);
+// A decoder reset after the first frame is a hard route failure on mobile.
+// Switch promptly so the next route still has time inside the shared startup
+// budget instead of leaving the player on a zero-position buffer.
+const playbackResetRecoveryDelay = Duration(seconds: 2);
 const playbackBufferRecoveryDelay = Duration(seconds: 6);
+const playbackStartupBufferRecoveryDelay = Duration(seconds: 2);
 const playbackSlowProgressWindow = Duration(seconds: 6);
 const playbackMinimumProgressRatio = 0.5;
 
@@ -89,6 +98,19 @@ bool isPlaybackPositionReset({
 
 Duration bufferingRecoveryDelay({required bool positionReset}) =>
     positionReset ? playbackResetRecoveryDelay : playbackBufferRecoveryDelay;
+
+Duration playbackTimeoutWithin(
+  DateTime now,
+  DateTime? deadline,
+  Duration fallback,
+) {
+  if (deadline == null) return fallback;
+  final remaining = deadline.difference(now);
+  if (remaining <= Duration.zero) {
+    throw TimeoutException('Playback failover budget exhausted', fallback);
+  }
+  return remaining < fallback ? remaining : fallback;
+}
 
 bool isFatalPlaybackLog(String text) {
   final lower = text.toLowerCase();
@@ -291,6 +313,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Duration _watchdogPosition = Duration.zero;
   DateTime _watchdogAdvancedAt = DateTime.now();
   DateTime? _seekGraceUntil;
+  DateTime? _startupFailoverDeadline;
 
   double _brightness = 0.5;
   double _volume = 0.5;
@@ -346,6 +369,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       const Duration(seconds: 1),
       (_) => _watchPlaybackProgress(),
     );
+    _startupFailoverDeadline = DateTime.now().add(playbackStartupBudget);
     unawaited(_loadSystemLevels());
     _openCurrent();
     _saveTimer = Timer.periodic(
@@ -402,8 +426,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await Future.wait([
         platform.setProperty('cache', 'yes'),
         platform.setProperty('cache-on-disk', 'no'),
-        platform.setProperty('cache-secs', '180'),
-        platform.setProperty('demuxer-readahead-secs', '90'),
+        platform.setProperty('cache-secs', '240'),
+        platform.setProperty('demuxer-readahead-secs', '120'),
         platform.setProperty('demuxer-seekable-cache', 'yes'),
         platform.setProperty('demuxer-max-back-bytes', '33554432'),
         platform.setProperty('cache-pause', 'yes'),
@@ -462,8 +486,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _stopTimelinePrefetch(clearSource: false);
     }
     if (!_opened || _stallTimer != null) return;
+    final startupDeadline = _startupFailoverDeadline;
+    final startupRecovery =
+        !positionReset &&
+        !_previouslyProgressed &&
+        startupDeadline != null &&
+        DateTime.now().isBefore(startupDeadline);
     _stallTimer = Timer(
-      bufferingRecoveryDelay(positionReset: positionReset),
+      startupRecovery
+          ? playbackStartupBufferRecoveryDelay
+          : bufferingRecoveryDelay(positionReset: positionReset),
       _downgradeAfterStall,
     );
   }
@@ -706,6 +738,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<bool> _openCurrent({
     bool allowAutoSwitch = true,
     bool scheduleStartupCheck = true,
+    DateTime? deadline,
   }) async {
     _opened = false;
     _stopTimelinePrefetch(clearSource: true);
@@ -731,6 +764,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _selectedTrackId = 'auto';
     });
     try {
+      // Cancel a previous route before opening a fallback. Without this, a
+      // stalled native open can keep its socket alive while the next route is
+      // already being selected, serializing both opens behind the bad line.
+      try {
+        await _player.stop().timeout(const Duration(seconds: 1));
+      } catch (_) {}
       var url = _current.url;
       Map<String, String>? headers = _current.headers;
       if (url.startsWith('videoget-rule:') ||
@@ -748,8 +787,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
           url,
           headers: headers,
           filterAds: true,
+          maxHeight: widget.appState.isEmulator ? 720 : null,
         );
         _prefetchUrl = proxyUrl;
+        final resume = _resume;
+        final resumeStart = shouldResumePlayback(resume, _current.name)
+            ? Duration(milliseconds: (resume!.progress * 1000).round())
+            : null;
+        final sourceUri = Uri.tryParse(url);
+        final sourcePort = sourceUri?.port ?? 0;
+        if (sourceUri?.scheme.toLowerCase() == 'https' &&
+            sourcePort > 0 &&
+            sourcePort != 443) {
+          throw StateError('线路媒体端口不可用');
+        }
+        // Warm the first segment in the background so mpv can use the local
+        // cache when it is ready, while keeping native decoder validation as
+        // the source of truth for routes whose upstream is merely slow.
+        if (resumeStart == null || resumeStart < const Duration(seconds: 10)) {
+          unawaited(PlaybackProxy.instance.warmUpFirstSegment(proxyUrl));
+        }
         url = proxyUrl.toString();
         headers = null;
       }
@@ -766,7 +823,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // resets its timeline after open() returns.
       await _player
           .open(Media(url, httpHeaders: headers, start: resumeStart))
-          .timeout(const Duration(seconds: 8));
+          .timeout(
+            playbackTimeoutWithin(
+              DateTime.now(),
+              deadline,
+              const Duration(seconds: 8),
+            ),
+          );
       _opened = true;
       await _player.setRate(_playbackRate);
       await _applyResumeIfReady();
@@ -775,7 +838,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         // media segment before the decoder exposes duration.  Keep the route
         // alive long enough to verify real progress instead of switching a
         // healthy but slow line while its first frame is still arriving.
-        _startupTimer = Timer(const Duration(seconds: 30), () {
+        _startupTimer = Timer(const Duration(seconds: 16), () {
           if (_opened &&
               needsStartupFailover(
                 duration: _player.state.duration,
@@ -813,6 +876,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<bool> _tryAutoSwitch(String reason) async {
     if (_autoSwitching || widget.playLines.length < 2) return false;
     _autoSwitching = true;
+    final startupDeadline = _startupFailoverDeadline;
+    final deadline =
+        startupDeadline != null && DateTime.now().isBefore(startupDeadline)
+        ? startupDeadline
+        : DateTime.now().add(playbackFailoverBudget);
     final originalLine = _lineIndex;
     final episodeName = _current.name;
     final fallbackIndex = _episodeIndex;
@@ -834,6 +902,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         fallbackIndex,
       );
       for (final target in targets) {
+        if (!DateTime.now().isBefore(deadline)) break;
         final nextLine = target.lineIndex;
         final nextEpisode = target.episodeIndex;
         final oldLineName = widget.playLines[previousLine].name;
@@ -860,8 +929,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final opened = await _openCurrent(
           allowAutoSwitch: false,
           scheduleStartupCheck: false,
+          deadline: deadline,
         );
-        final ready = opened && await _waitForPlaybackReady();
+        final ready = opened && await _waitForPlaybackReady(deadline: deadline);
         final finalPosition = _player.state.position;
         debugPrint(
           'PLAYBACK_FAILOVER reason=$reason old=$oldLineName new=$newLineName '
@@ -899,11 +969,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Future<bool> _waitForPlaybackReady() async {
-    final deadline = DateTime.now().add(const Duration(seconds: 10));
+  Future<bool> _waitForPlaybackReady({DateTime? deadline}) async {
+    final readyDeadline =
+        deadline ?? DateTime.now().add(const Duration(seconds: 10));
     Duration? previousPosition;
     var continuousProgress = Duration.zero;
-    while (mounted && _opened && DateTime.now().isBefore(deadline)) {
+    while (mounted && _opened && DateTime.now().isBefore(readyDeadline)) {
       final position = _player.state.position;
       continuousProgress = continuousPlaybackProgress(
         accumulated: continuousProgress,
@@ -922,7 +993,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       )) {
         return true;
       }
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      final remaining = readyDeadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) break;
+      await Future<void>.delayed(
+        remaining < const Duration(milliseconds: 200)
+            ? remaining
+            : const Duration(milliseconds: 200),
+      );
     }
     return false;
   }

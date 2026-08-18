@@ -17,6 +17,7 @@
 - Range responses are cached only after a matching `206 + Content-Range`; sources that ignore Range and return a full `200` response can no longer poison later seeks.
 - Desktop HLS prefetch selects the highest available variant at or below 1080p, and reports empty or failed downloads instead of counting them as completed cache entries.
 - Desktop and Android HLS filtering recognize marked ads and conservative discontinuity-based ad islands while preserving encryption keys, init maps, episode position, and line handoff state.
+- Android HLS filtering also removes gambling-ad URI markers such as casino, betting, sportsbook, lottery, jackpot, and slot segments without disturbing adjacent episode media.
 - Desktop history persists native playback progress and opens cached playback lines immediately; Android manual line changes and automatic failover both keep the matching episode.
 
 ### Build and signing
@@ -30,7 +31,7 @@
 - A networked Android API 35 AVD searched `怪奇物语第五季` in `3.246 s`, resolved seven playback lines in `10.292 s`, selected line B, and started a `4,288,083 ms` episode in `10.550 s`.
 - Playback advanced for `10.291 s` with zero buffering events; network seeks resumed in `1.753 s` at five minutes and `3.387 s` at ten minutes, both below the eight-second release limit.
 - The AVD's composed ten-minute video frame was visibly decoded with subtitles; its video crop contained `94.44%` non-dark pixels. Brightness reached `1.0`, volume reached `1.0`, hold playback reached `2.0x`, history persisted at `619.439 s`, and no `avformat_open_input` failure was observed.
-- Flutter analysis reported no issues; 82 host mobile tests passed with one Android-only QuickJS test skipped. A later live rerun still completed network search/detail and automatic line failover, but the upstream HLS provider intermittently rejected key/first-segment requests on the AVD with crypto/H.264 errors; those transient provider failures are not counted as a successful cold-start result.
+- Flutter analysis reported no issues; 86 host mobile tests passed with one Android-only QuickJS test skipped. Later live reruns still completed network search/detail and automatic line failover, but the upstream HLS provider intermittently rejected key/first-segment requests on the AVD with crypto/H.264 errors; those transient provider failures are not counted as a successful cold-start result.
 - The final `0.0.5 (5)` APK contains `armeabi-v7a`, `arm64-v8a`, and `x86_64`, passed the fixed-signature check, and upgraded successfully on Android `user 0` with `adb install -r`.
 
 ## [0.0.4] - 2026-08-16

@@ -1,4 +1,6 @@
 import 'package:flutter/widgets.dart';
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:videoget_mobile/models/models.dart';
@@ -202,6 +204,30 @@ void main() {
     expect(targets, hasLength(1));
     expect(targets.single.lineIndex, 1);
     expect(targets.single.episodeIndex, 1);
+  });
+
+  test('换线打开等待受全局截止时间限制', () {
+    final now = DateTime(2026, 1, 1);
+    expect(
+      playbackTimeoutWithin(
+        now,
+        now.add(const Duration(seconds: 3)),
+        const Duration(seconds: 8),
+      ),
+      const Duration(seconds: 3),
+    );
+    expect(
+      playbackTimeoutWithin(now, null, const Duration(seconds: 8)),
+      const Duration(seconds: 8),
+    );
+    expect(
+      () => playbackTimeoutWithin(
+        now,
+        now.subtract(const Duration(milliseconds: 1)),
+        const Duration(seconds: 8),
+      ),
+      throwsA(isA<TimeoutException>()),
+    );
   });
 
   test('首播只有状态正常但未连续推进时仍触发换线', () {

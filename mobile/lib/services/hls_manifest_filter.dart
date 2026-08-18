@@ -14,6 +14,59 @@ class HlsFilterResult {
   });
 }
 
+/// Removes master-playlist variants above [maxHeight] while retaining the
+/// highest variant at or below the cap. Media playlists are returned as-is.
+/// This is used only for constrained renderers such as the API 35 AVD; normal
+/// Android devices keep the complete adaptive ladder.
+String limitHlsVariantHeight(String manifest, int maxHeight) {
+  if (maxHeight <= 0) return manifest;
+  final lines = manifest.split(RegExp(r'\r?\n'));
+  final variantIndexes = <int>[];
+  final heights = <int>[];
+  for (var index = 0; index < lines.length; index++) {
+    final line = lines[index].trim();
+    if (!line.toUpperCase().startsWith('#EXT-X-STREAM-INF:')) continue;
+    final resolution = RegExp(
+      r'(?:^|,)RESOLUTION=\d+x(\d+)(?:,|$)',
+      caseSensitive: false,
+    ).firstMatch(line);
+    final height = int.tryParse(resolution?.group(1) ?? '') ?? 0;
+    variantIndexes.add(index);
+    heights.add(height);
+  }
+  if (variantIndexes.isEmpty) return manifest;
+
+  final eligible = [
+    for (var index = 0; index < heights.length; index++)
+      if (heights[index] > 0 && heights[index] <= maxHeight) index,
+  ];
+  final selectedHeight = eligible.isNotEmpty
+      ? eligible.map((index) => heights[index]).reduce(math.max)
+      : heights.where((height) => height > 0).fold<int>(0, math.min);
+  final keep = <int>{
+    for (var index = 0; index < heights.length; index++)
+      if (heights[index] == selectedHeight) index,
+  };
+  final output = <String>[];
+  var variant = 0;
+  var skipUri = false;
+  for (var index = 0; index < lines.length; index++) {
+    final trimmed = lines[index].trim();
+    if (trimmed.toUpperCase().startsWith('#EXT-X-STREAM-INF:')) {
+      final shouldKeep = keep.contains(variant++);
+      if (shouldKeep) output.add(lines[index]);
+      skipUri = !shouldKeep;
+      continue;
+    }
+    if (skipUri && trimmed.isNotEmpty && !trimmed.startsWith('#')) {
+      skipUri = false;
+      continue;
+    }
+    output.add(lines[index]);
+  }
+  return output.join('\n');
+}
+
 class _SegmentBlock {
   final List<String> tags;
   final String uri;
@@ -47,7 +100,7 @@ final _markerTag = RegExp(
   caseSensitive: false,
 );
 final _adUriToken = RegExp(
-  r'(?:^|[./_-])(?:ads?|advert|adserver|commercial|preroll|midroll|postroll)(?:[./_-]|$)',
+  r'(?:^|[./_-])(?:ads?|advert|adserver|commercial|preroll|midroll|postroll|casino|gambl(?:e|ing)|bet(?:ting)?|sportsbook|lottery|jackpot|slot)(?:[./_-]|$)',
   caseSensitive: false,
 );
 

@@ -38,6 +38,15 @@ class RouteEngine {
     'builtin-line-b': 45,
   };
   static const Map<String, double> _observedUnreliablePenalty = {
+    // Current AVD playback can expose a first frame before the source resets
+    // its decoder or stalls. Byte-level probes alone therefore over-rank it.
+    'builtin-line-a': 1600,
+    // The current AVD path repeatedly reaches this route's encrypted media
+    // host but fails to decrypt the first segment (port 999). Keep it as a
+    // fallback while preventing a fast manifest probe from selecting it.
+    'builtin-line-b': 2600,
+    'builtin-line-e': 1600,
+    'builtin-line-f': 1600,
     // Two real AVD runs produced corrupt AAC frames and a zero-position stall
     // on this route. Keep it available as a last resort, but never let a fast
     // manifest probe put it ahead of a route that can sustain playback.
@@ -46,6 +55,15 @@ class RouteEngine {
     // reset to zero without making sustained progress.
     'builtin-line-g': 1600,
     'builtin-line-c': 1600,
+    // The current AVD run also reaches a first frame on this route and then
+    // resets before a stable playback window.
+    'builtin-line-i': 1600,
+    // J/K/L currently resolve to media hosts on ports 999/18443/65 in the
+    // networked AVD and cannot complete the first-segment handshake there.
+    'builtin-line-j': 3200,
+    'builtin-line-k': 3200,
+    'builtin-line-l': 3200,
+    'builtin-line-m': 3200,
   };
 
   static double validatedStabilityPrior(String? sourceId) =>
@@ -77,12 +95,15 @@ class RouteEngine {
         candidates
             .where((candidate) => _isHttp(candidate.episode?.url))
             .toList()
-          ..sort(
-            (left, right) => _historicalScore(
-              right,
-              preferredLineName,
-            ).compareTo(_historicalScore(left, preferredLineName)),
-          );
+          ..sort((left, right) {
+            final rightPriority =
+                _historicalScore(right, preferredLineName) -
+                _observedUnreliablePenaltyFor(right.episode);
+            final leftPriority =
+                _historicalScore(left, preferredLineName) -
+                _observedUnreliablePenaltyFor(left.episode);
+            return rightPriority.compareTo(leftPriority);
+          });
     final selected = probeCandidates.take(8).toList();
     final futures = selected.map((candidate) async {
       try {
@@ -170,6 +191,7 @@ class RouteEngine {
     var bandwidth = 0;
     var manifestLatency = manifestProbe.elapsed;
     var usedProxy = manifestProbe.usedProxy;
+    var nonStandardPort = _hasNonStandardPort(manifestUrl);
     var mediaHeaders = _headersWithReferer(episode.headers, manifestUrl);
     final variants = _parseVariants(manifest, manifestUrl);
     if (variants.isNotEmpty) {
@@ -198,12 +220,14 @@ class RouteEngine {
       manifest = _decode(mediaProbe.bytes);
       manifestLatency += mediaProbe.elapsed;
       usedProxy = usedProxy || mediaProbe.usedProxy;
+      nonStandardPort = nonStandardPort || _hasNonStandardPort(manifestUrl);
       mediaHeaders = _headersWithReferer(episode.headers, manifestUrl);
     }
     // Probe the opening pair plus distant VOD anchors. Keeping this bounded
     // protects cold playback from route probes consuming the same source
     // bandwidth that the selected player needs for its first frame.
     final segmentUrls = _segmentUrls(manifest, manifestUrl, limit: 2);
+    nonStandardPort = nonStandardPort || segmentUrls.any(_hasNonStandardPort);
     if (segmentUrls.isEmpty) {
       recordPlaybackSuccess(episode, latency: manifestLatency);
       return _RouteResult(
@@ -237,14 +261,23 @@ class RouteEngine {
     // while the key endpoint is blocked. Probe the first key through the same
     // NetService transport so the route is not ranked above a playable line.
     final keyUrls = _keyUrls(manifest, manifestUrl, limit: 1);
+    nonStandardPort = nonStandardPort || keyUrls.any(_hasNonStandardPort);
     for (final keyUrl in keyUrls) {
+      // Keep key validation on the same transport path as the manifest. A
+      // proxy can serve the playlist and media CDN while its TLS path to the
+      // key origin is broken; allowing a direct fallback here would rank a
+      // route that the Android playback proxy cannot decrypt reliably.
+      if (manifestProbe.usedProxy) {
+        NetService.recordProxyResult(keyUrl, usedProxy: true);
+      }
       final keyProbe = await _load(
         keyUrl.toString(),
         headers: mediaHeaders,
         timeout: _stageTimeout(deadline),
         maxBytes: 16 * 1024,
       );
-      if (_isInvalidMediaProbe(keyProbe)) {
+      if (_isInvalidMediaProbe(keyProbe) ||
+          (manifestProbe.usedProxy && !keyProbe.usedProxy)) {
         recordPlaybackFailure(episode);
         return _RouteResult.failed(candidate.index);
       }
@@ -265,6 +298,7 @@ class RouteEngine {
       bandwidth: bandwidth,
       throughputBps: throughputBps,
       usedProxy: usedProxy || segmentProbes.any((probe) => probe.usedProxy),
+      nonStandardPort: nonStandardPort,
     );
   }
 
@@ -301,6 +335,7 @@ class RouteEngine {
   ) {
     var score = _historicalScore(candidate, preferredLineName);
     score -= _observedUnreliablePenaltyFor(candidate.episode);
+    score -= _nonStandardPortPenalty(candidate.episode);
     if (result == null) return score - 80;
     if (result.timedOut) {
       // A timeout is inconclusive, but it must not keep a slow route ahead of
@@ -318,6 +353,7 @@ class RouteEngine {
     // Keep a modest cost for the extra hop without allowing it to outweigh
     // sustained-playback evidence from a route that is healthy right now.
     if (result.usedProxy) score -= 150;
+    if (result.nonStandardPort) score -= 520;
     score += _validatedStabilityPriorFor(candidate.episode);
     score += math.min(result.resolutionHeight, 1080) / 1080 * 240;
     score -= math.min(result.latencyMs, 8000) / 8000 * 320;
@@ -356,9 +392,17 @@ class RouteEngine {
     return score;
   }
 
-  double _validatedStabilityPriorFor(Episode? episode) => episode == null
-      ? 0
-      : math.min(validatedStabilityPrior(episode.sourceId), 350);
+  // Playback ordering is based on the current route probe and observed
+  // health. Historical priors still help search result grouping, but must not
+  // displace a route that responds faster in the current session.
+  double _validatedStabilityPriorFor(Episode? episode) => 0;
+
+  double _nonStandardPortPenalty(Episode? episode) {
+    final uri = episode == null ? null : Uri.tryParse(episode.url);
+    if (uri == null || uri.scheme.toLowerCase() != 'https') return 0;
+    final port = uri.port;
+    return port > 0 && port != 443 ? 520 : 0;
+  }
 
   double _observedUnreliablePenaltyFor(Episode? episode) =>
       episode == null ? 0 : _observedUnreliablePenalty[episode.sourceId] ?? 0;
@@ -544,6 +588,11 @@ class RouteEngine {
     if (uri != null && uri.hasScheme && uri.host.isNotEmpty) return uri.origin;
     return '${episode.sourceId ?? ''}:${episode.url}';
   }
+
+  static bool _hasNonStandardPort(Uri uri) {
+    final scheme = uri.scheme.toLowerCase();
+    return scheme == 'https' && uri.port > 0 && uri.port != 443;
+  }
 }
 
 class _RouteCandidate {
@@ -567,6 +616,7 @@ class _RouteResult {
   final int bandwidth;
   final double throughputBps;
   final bool usedProxy;
+  final bool nonStandardPort;
 
   const _RouteResult({
     required this.index,
@@ -576,6 +626,7 @@ class _RouteResult {
     this.bandwidth = 0,
     this.throughputBps = 0,
     this.usedProxy = false,
+    this.nonStandardPort = false,
   }) : timedOut = false;
 
   const _RouteResult.failed(this.index)
@@ -585,7 +636,8 @@ class _RouteResult {
       resolutionHeight = 0,
       bandwidth = 0,
       throughputBps = 0,
-      usedProxy = false;
+      usedProxy = false,
+      nonStandardPort = false;
 
   const _RouteResult.timedOut(this.index)
     : success = false,
@@ -594,7 +646,8 @@ class _RouteResult {
       resolutionHeight = 0,
       bandwidth = 0,
       throughputBps = 0,
-      usedProxy = false;
+      usedProxy = false,
+      nonStandardPort = false;
 }
 
 class _HlsVariant {

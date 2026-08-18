@@ -9,7 +9,7 @@ class StorageService {
   static const _historyKey = 'videoget.history';
   static const _qualityKey = 'videoget.quality';
   static const _playbackTuningKey = 'videoget.playback-tuning.v2';
-  static const _managedSourcesKey = 'videoget.managed-sources.v3';
+  static const _managedSourcesKey = 'videoget.managed-sources.v4';
 
   static const _defaultSources = [
     {
@@ -106,6 +106,46 @@ class StorageService {
       'enabled': true,
       'searchable': true,
     },
+    {
+      'id': 'builtin-line-i',
+      'name': '默认线路 I',
+      'type': 'cms',
+      'api': 'https://ikunzyapi.com/api.php/provide/vod/',
+      'enabled': true,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-line-j',
+      'name': '默认线路 J',
+      'type': 'cms',
+      'api': 'https://api.guangsuapi.com/api.php/provide/vod/from/gsm3u8',
+      'enabled': true,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-line-k',
+      'name': '默认线路 K',
+      'type': 'cms',
+      'api': 'https://jyzyapi.com/provide/vod/from/jinyingm3u8',
+      'enabled': true,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-line-l',
+      'name': '默认线路 L',
+      'type': 'cms',
+      'api': 'https://360zy.com/api.php/provide/vod',
+      'enabled': true,
+      'searchable': true,
+    },
+    {
+      'id': 'builtin-line-m',
+      'name': '默认线路 M',
+      'type': 'cms',
+      'api': 'https://iqiyizyapi.com/api.php/provide/vod',
+      'enabled': true,
+      'searchable': true,
+    },
   ];
 
   Future<List<CmsSource>> getSources() async {
@@ -119,18 +159,14 @@ class StorageService {
         .map((s) => CmsSource.fromJson(s as Map<String, dynamic>))
         .toList();
     final byId = {for (final source in persisted) source.id: source.toJson()};
-    final managed = _defaultSources
-        .map(
-          (source) {
-            final saved = byId[source['id']];
-            return CmsSource.fromJson({
-              ...source,
-              if (saved != null) 'enabled': saved['enabled'],
-              if (saved != null) 'searchable': saved['searchable'],
-            });
-          },
-        )
-        .toList();
+    final managed = _defaultSources.map((source) {
+      final saved = byId[source['id']];
+      return CmsSource.fromJson({
+        ...source,
+        if (saved != null) 'enabled': saved['enabled'],
+        if (saved != null) 'searchable': saved['searchable'],
+      });
+    }).toList();
     final custom = persisted
         .where((source) => !source.id.startsWith('builtin-'))
         .toList();
